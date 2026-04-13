@@ -1,0 +1,62 @@
+# Template Demo Workflow
+# Demonstrates the use of variables and templates in Cray workflows
+
+name: template-demo
+description: Demonstrates template variables and expressions
+
+# Define workflow-level variables
+variables:
+  api_base: "https://jsonplaceholder.typicode.com"
+  output_dir: "./output"
+  date_format: "%Y-%m-%d"
+
+steps:
+  # Use built-in variables
+  - name: show_date
+    plugin: shell
+    action: exec
+    params:
+      command: echo "Today is {{ today }}, timestamp: {{ timestamp }}"
+
+  # Use workflow variables
+  - name: fetch_posts
+    plugin: http
+    action: get
+    params:
+      url: "{{ input.api_base }}/posts/1"
+
+  # Reference previous step output
+  - name: save_post
+    plugin: file
+    action: write
+    params:
+      path: "{{ input.output_dir }}/post_{{ steps.fetch_posts.id }}.json"
+      content: "{{ steps.fetch_posts.body | string }}"
+
+  # Use filters
+  - name: process_title
+    plugin: text
+    action: format
+    params:
+      template: "Title: {}"
+      values:
+        - "{{ steps.fetch_posts.title | upper }}"
+
+  # Conditional execution based on previous step
+  - name: conditional_step
+    plugin: shell
+    action: exec
+    params:
+      command: echo "Previous step succeeded!"
+    condition: "{{ steps.save_post.success }}"
+
+  # Use UUID for unique filenames
+  - name: create_unique_file
+    plugin: file
+    action: write
+    params:
+      path: "{{ input.output_dir }}/report_{{ uuid }}.txt"
+      content: |
+        Report generated on {{ today }}
+        Post ID: {{ steps.fetch_posts.id }}
+        Title: {{ steps.fetch_posts.title }}

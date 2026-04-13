@@ -3,12 +3,14 @@ Workflow runner - executes workflows step by step.
 """
 
 import asyncio
+import os
 from typing import Dict, Any, Optional
 from datetime import datetime
 from loguru import logger
 
 from cray.core.workflow import Workflow, Step
 from cray.core.task import Task, TaskResult, TaskStatus
+from cray.core.template import render
 from cray.plugins import PluginManager
 
 
@@ -43,9 +45,14 @@ class Runner:
         task.start()
         
         logger.info(f"Starting workflow '{workflow.name}' (task: {task.id})")
-        
-        # Context for step execution (stores step outputs)
-        context: Dict[str, Any] = {"input": task.input, "steps": {}}
+
+        # Build context with variables, input, and steps
+        # Variables are merged with input (input takes precedence)
+        context: Dict[str, Any] = {
+            "variables": workflow.variables,
+            "input": {**workflow.variables, **task.input},
+            "steps": {}
+        }
         
         try:
             for step in workflow.steps:
@@ -92,51 +99,56 @@ class Runner:
         return task
     
     async def _execute_step(
-        self, 
-        step: Step, 
+        self,
+        step: Step,
         context: Dict[str, Any]
     ) -> TaskResult:
         """Execute a single step."""
         start_time = datetime.now()
-        
+
         logger.debug(f"Executing step '{step.name}' with plugin '{step.plugin}'")
-        
+
         try:
             # Get plugin
             plugin = self.plugin_manager.get_plugin(step.plugin)
-            
+
             if not plugin:
                 return TaskResult(
                     step_name=step.name,
                     success=False,
                     error=f"Plugin '{step.plugin}' not found"
                 )
-            
-            # Check condition if present
+
+            # Render templates in condition
             if step.condition:
-                if not self._evaluate_condition(step.condition, context):
+                rendered_condition = render(step.condition, context, dict(os.environ))
+                if not self._evaluate_condition(rendered_condition, context):
                     logger.info(f"Step '{step.name}' skipped (condition not met)")
                     return TaskResult(
                         step_name=step.name,
                         success=True,
                         output={"skipped": True, "reason": "condition_not_met"}
                     )
-            
+
+            # Render templates in params
+            rendered_params = render(step.params, context, dict(os.environ))
+            logger.debug(f"Rendered params for '{step.name}': {rendered_params}")
+
             # Execute action with timeout
             output = await asyncio.wait_for(
-                plugin.execute(step.action, step.params, context),
+                plugin.execute(step.action, rendered_params, context),
                 timeout=step.timeout
             )
-            
+
             duration_ms = int((datetime.now() - start_time).total_seconds() * 1000)
-            
+
             return TaskResult(
                 step_name=step.name,
                 success=True,
                 output=output,
                 duration_ms=duration_ms
             )
-            
+
         except asyncio.TimeoutError:
             return TaskResult(
                 step_name=step.name,
