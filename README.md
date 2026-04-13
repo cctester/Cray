@@ -195,6 +195,48 @@ pytest
 pytest --cov=cray
 ```
 
+## Roadmap
+
+### 🚧 In Progress
+
+- [ ] **Dashboard Frontend** - Vue 3 web UI for workflow management (partially implemented)
+- [ ] **WebSocket Real-time Updates** - Live task status in dashboard
+- [ ] **Workflow Editor** - Visual workflow builder in dashboard
+
+### 📋 Planned Plugins
+
+| Plugin | Description | Priority |
+|--------|-------------|----------|
+| **database** | SQLite, PostgreSQL, MySQL operations | High |
+| **aws** | AWS S3, EC2, Lambda integrations | High |
+| **git** | Git clone, commit, push, pull operations | High |
+| **docker** | Docker container management | Medium |
+| **redis** | Redis cache and queue operations | Medium |
+| **csv** | CSV file read, write, transform | Medium |
+| **xml** | XML parsing and transformation | Medium |
+| **image** | Image resize, convert, watermark | Low |
+| **pdf** | PDF generation and manipulation | Low |
+| **archive** | Zip, tar, gzip compression | Low |
+| **ssh** | Remote SSH command execution | Medium |
+| **ftp** | FTP/SFTP file transfers | Low |
+
+### 🔮 Planned Features
+
+- [ ] **Workflow Dependencies** - Chain workflows with dependencies
+- [ ] **Parallel Execution** - Run multiple steps concurrently
+- [ ] **Error Handling** - `on_error` steps, retry policies
+- [ ] **Variables & Templates** - Jinja2 templates in workflows
+- [ ] **Secrets Management** - Secure credential storage
+- [ ] **Workflow Versioning** - Track and rollback changes
+- [ ] **Import/Export** - Share workflows between instances
+- [ ] **Plugin Marketplace** - Discover and install community plugins
+- [ ] **Metrics & Monitoring** - Prometheus integration
+- [ ] **Cluster Mode** - Distributed workflow execution
+
+## Contributing
+
+Contributions are welcome! See [PLUGIN_DEVELOPMENT.md](docs/PLUGIN_DEVELOPMENT.md) for plugin development guide.
+
 ## License
 
 MIT
