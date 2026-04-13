@@ -1,0 +1,32 @@
+name: notification-example
+version: "1.0"
+description: Send notifications on workflow completion
+
+steps:
+  - name: process-data
+    plugin: shell
+    action: exec
+    params:
+      command: echo "Processing complete at $(date)"
+
+  - name: send-slack
+    plugin: notify
+    action: slack
+    params:
+      webhook_url: "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+      text: "✅ Workflow {{ workflow.name }} completed successfully!"
+    condition: "{{ steps.process-data.success }}"
+
+  - name: send-telegram
+    plugin: notify
+    action: telegram
+    params:
+      bot_token: "YOUR_BOT_TOKEN"
+      chat_id: "YOUR_CHAT_ID"
+      text: |
+        <b>Workflow Complete</b>
+        
+        Name: {{ workflow.name }}
+        Status: Success
+        Time: {{ input.timestamp }}
+      parse_mode: "HTML"

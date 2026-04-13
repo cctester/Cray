@@ -1,0 +1,20 @@
+name: web-scrape
+version: "1.0"
+description: Fetch data from a website and save to file
+
+steps:
+  - name: fetch-data
+    plugin: http
+    action: get
+    params:
+      url: https://httpbin.org/json
+      timeout: 10
+
+  - name: save-data
+    plugin: file
+    action: write
+    params:
+      path: ./data.json
+      content: "{{ steps.fetch-data.body }}"
+      parse_json: true
+    condition: "{{ steps.fetch-data.success }}"

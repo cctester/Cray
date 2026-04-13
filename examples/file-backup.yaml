@@ -1,0 +1,29 @@
+name: file-backup
+version: "1.0"
+description: Backup files to a timestamped directory
+
+steps:
+  - name: create-backup-dir
+    plugin: file
+    action: mkdir
+    params:
+      path: ./backups/backup-{{ input.timestamp }}
+
+  - name: copy-config
+    plugin: file
+    action: copy
+    params:
+      src: ./config.yaml
+      dst: ./backups/backup-{{ input.timestamp }}/config.yaml
+
+  - name: list-backup
+    plugin: file
+    action: list
+    params:
+      path: ./backups/backup-{{ input.timestamp }}
+
+  - name: notify-complete
+    plugin: shell
+    action: exec
+    params:
+      command: echo "Backup complete! Files: {{ steps.list-backup.count }}"

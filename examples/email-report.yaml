@@ -1,0 +1,65 @@
+name: email-report
+version: "1.0"
+description: Generate and email a report
+
+steps:
+  - name: generate-data
+    plugin: shell
+    action: exec
+    params:
+      command: |
+        echo '{"sales": 15000, "orders": 42, "customers": 38}'
+
+  - name: parse-data
+    plugin: json
+    action: parse
+    params:
+      data: "{{ steps.generate-data.stdout }}"
+
+  - name: calculate-metrics
+    plugin: math
+    action: calculate
+    params:
+      expression: "sales / orders"
+      variables:
+        sales: "{{ steps.parse-data.data.sales }}"
+        orders: "{{ steps.parse-data.data.orders }}"
+
+  - name: format-currency
+    plugin: math
+    action: format
+    params:
+      number: "{{ steps.parse-data.data.sales }}"
+      format: "currency"
+      symbol: "$"
+
+  - name: compose-email
+    plugin: text
+    action: template
+    params:
+      template: |
+        <h2>Daily Sales Report</h2>
+        <ul>
+          <li>Total Sales: {{ sales }}</li>
+          <li>Orders: {{ orders }}</li>
+          <li>Average Order Value: ${{ avg_order }}</li>
+        </ul>
+      context:
+        sales: "{{ steps.format-currency.result }}"
+        orders: "{{ steps.parse-data.data.orders }}"
+        avg_order: "{{ steps.calculate-metrics.result }}"
+
+  - name: send-email
+    plugin: email
+    action: send
+    params:
+      to: 
+        - "team@example.com"
+      subject: "📊 Daily Sales Report"
+      body: "{{ steps.compose-email.result }}"
+      content_type: "html"
+      smtp_host: "smtp.example.com"
+      smtp_port: 587
+      smtp_user: "notifications@example.com"
+      smtp_password: "YOUR_PASSWORD"
+      use_tls: true

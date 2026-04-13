@@ -1,0 +1,33 @@
+name: scheduled-backup
+version: "1.0"
+description: Daily backup workflow
+
+triggers:
+  - schedule: "0 2 * * *"  # Run at 2 AM daily
+
+steps:
+  - name: create-backup-dir
+    plugin: file
+    action: mkdir
+    params:
+      path: ./backups/{{ input.date }}
+
+  - name: backup-config
+    plugin: file
+    action: copy
+    params:
+      src: ./config.yaml
+      dst: ./backups/{{ input.date }}/config.yaml
+
+  - name: backup-data
+    plugin: file
+    action: copy
+    params:
+      src: ./data
+      dst: ./backups/{{ input.date }}/data
+
+  - name: cleanup-old-backups
+    plugin: shell
+    action: exec
+    params:
+      command: find ./backups -type d -mtime +30 -exec rm -rf {} \;

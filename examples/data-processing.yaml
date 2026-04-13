@@ -1,0 +1,46 @@
+name: data-processing
+version: "1.0"
+description: Process JSON data with transformations
+
+steps:
+  - name: fetch-api-data
+    plugin: http
+    action: get
+    params:
+      url: "https://jsonplaceholder.typicode.com/users"
+      timeout: 10
+
+  - name: extract-names
+    plugin: json
+    action: query
+    params:
+      data: "{{ steps.fetch-api-data.body }}"
+      path: "[].name"
+
+  - name: count-users
+    plugin: math
+    action: calculate
+    params:
+      expression: "len(users)"
+      variables:
+        users: "{{ steps.extract-names.data }}"
+
+  - name: format-report
+    plugin: text
+    action: template
+    params:
+      template: |
+        📊 User Report
+        ==============
+        Total Users: {{ count }}
+        Users: {{ names }}
+      context:
+        count: "{{ steps.count-users.result }}"
+        names: "{{ steps.extract-names.data }}"
+
+  - name: save-report
+    plugin: file
+    action: write
+    params:
+      path: "./reports/user-report.txt"
+      content: "{{ steps.format-report.result }}"

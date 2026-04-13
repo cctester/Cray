@@ -1,0 +1,17 @@
+name: hello-world
+version: "1.0"
+description: A simple Hello World workflow
+
+steps:
+  - name: greet
+    plugin: shell
+    action: exec
+    params:
+      command: echo "Hello from Cray! 🦞"
+
+  - name: save-greeting
+    plugin: file
+    action: write
+    params:
+      path: ./hello.txt
+      content: "Hello from Cray! Created at {{ input.timestamp }}"
