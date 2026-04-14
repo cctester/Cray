@@ -1,0 +1,75 @@
+# Dependency Chain Demo Workflow
+# Demonstrates step dependencies and execution order
+
+name: dependency-demo
+description: Shows how step dependencies work in Cray
+
+variables:
+  api_base: "https://jsonplaceholder.typicode.com"
+
+steps:
+  # Independent steps - can run in parallel
+  - name: fetch_users
+    plugin: http
+    action: get
+    params:
+      url: "{{ input.api_base }}/users"
+
+  - name: fetch_posts
+    plugin: http
+    action: get
+    params:
+      url: "{{ input.api_base }}/posts"
+
+  # This step depends on both fetch steps
+  - name: combine_data
+    plugin: json
+    action: merge
+    params:
+      users: "{{ steps.fetch_users.body }}"
+      posts: "{{ steps.fetch_posts.body }}"
+    depends_on:
+      - fetch_users
+      - fetch_posts
+
+  # This step depends on combine_data
+  - name: save_combined
+    plugin: file
+    action: write
+    params:
+      path: "./output/combined_{{ today }}.json"
+      content: "{{ steps.combine_data | json }}"
+    depends_on:
+      - combine_data
+
+  # Parallel steps after save_combined
+  - name: count_users
+    plugin: json
+    action: query
+    params:
+      data: "{{ steps.combine_data.users }}"
+      query: "length"
+    depends_on:
+      - save_combined
+
+  - name: count_posts
+    plugin: json
+    action: query
+    params:
+      data: "{{ steps.combine_data.posts }}"
+      query: "length"
+    depends_on:
+      - save_combined
+
+  # Final step depends on both counts
+  - name: generate_report
+    plugin: text
+    action: format
+    params:
+      template: "Report: {} users, {} posts"
+      values:
+        - "{{ steps.count_users.result }}"
+        - "{{ steps.count_posts.result }}"
+    depends_on:
+      - count_users
+      - count_posts

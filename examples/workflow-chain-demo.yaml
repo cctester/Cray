@@ -1,0 +1,39 @@
+# Workflow Chain Demo
+# Demonstrates workflow-level dependencies
+
+name: data-pipeline
+description: A pipeline of dependent workflows
+
+# This workflow depends on other workflows being completed first
+dependencies:
+  - workflow: fetch-raw-data
+    name: fetch
+    
+  - workflow: clean-data
+    name: clean
+    depends_on:
+      - fetch
+      
+  - workflow: transform-data
+    name: transform
+    depends_on:
+      - clean
+      
+  - workflow: validate-data
+    name: validate
+    depends_on:
+      - transform
+      
+  - workflow: load-to-warehouse
+    name: load
+    depends_on:
+      - validate
+
+# This workflow's steps will execute after all dependencies complete
+steps:
+  - name: notify_completion
+    plugin: notify
+    action: slack
+    params:
+      channel: "#data-team"
+      message: "Pipeline completed successfully!"

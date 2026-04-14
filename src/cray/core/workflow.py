@@ -11,15 +11,16 @@ from pydantic import BaseModel, Field
 
 class Step(BaseModel):
     """A single step in a workflow."""
-    
+
     name: str
     plugin: str
     action: str
     params: Dict[str, Any] = Field(default_factory=dict)
+    depends_on: List[str] = Field(default_factory=list)
     condition: Optional[str] = None
     retry: int = 0
     timeout: int = 300
-    
+
     class Config:
         extra = "allow"
 
@@ -54,6 +55,7 @@ class Workflow(BaseModel):
     version: str = "1.0"
     description: str = ""
     variables: Dict[str, Any] = Field(default_factory=dict)
+    dependencies: List[Dict[str, Any]] = Field(default_factory=list)
     triggers: List[Trigger] = Field(default_factory=list)
     steps: List[Step] = Field(default_factory=list)
     on_success: List[Dict[str, Any]] = Field(default_factory=list)
@@ -93,6 +95,7 @@ class Workflow(BaseModel):
             version=data.get("version", "1.0"),
             description=data.get("description", ""),
             variables=data.get("variables", {}),
+            dependencies=data.get("dependencies", []),
             triggers=triggers,
             steps=steps,
             on_success=data.get("on_success", []),
@@ -108,17 +111,20 @@ class Workflow(BaseModel):
             "version": self.version,
             "description": self.description,
         }
-        
+
         if self.variables:
             data["variables"] = self.variables
-        
+
+        if self.dependencies:
+            data["dependencies"] = self.dependencies
+
         data["triggers"] = [
             {"schedule": t.config["cron"]} if t.type == TriggerType.SCHEDULE
             else {"manual": True}
             for t in self.triggers
         ]
         data["steps"] = [step.model_dump() for step in self.steps]
-        
+
         if self.on_success:
             data["on_success"] = self.on_success
         if self.on_failure:
