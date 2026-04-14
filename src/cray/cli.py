@@ -319,5 +319,197 @@ def serve(host: str, port: int, workflow_dir: str):
     uvicorn.run(app, host=host, port=port)
 
 
+# Plugin marketplace commands
+@main.group()
+def plugin():
+    """Manage plugins from the marketplace."""
+    pass
+
+
+@plugin.command("search")
+@click.argument("query", default="")
+@click.option("--keyword", "-k", multiple=True, help="Filter by keyword")
+@click.option("--limit", "-l", default=20, help="Maximum results")
+def plugin_search(query: str, keyword: tuple, limit: int):
+    """Search for plugins in the marketplace."""
+    from cray.plugins.market import PluginMarket
+
+    market = PluginMarket()
+    plugins = market.search(query, list(keyword) if keyword else None, limit)
+
+    if not plugins:
+        console.print("[yellow]No plugins found[/yellow]")
+        return
+
+    table = Table(title=f"Plugin Search Results ({len(plugins)} found)")
+    table.add_column("Name", style="cyan")
+    table.add_column("Version", style="green")
+    table.add_column("Description", style="white")
+    table.add_column("Rating", style="yellow")
+    table.add_column("Downloads", style="dim")
+    table.add_column("Status", style="magenta")
+
+    for p in plugins:
+        status = "[green]installed[/green]" if p.installed else ""
+        table.add_row(
+            p.name,
+            p.version,
+            p.description[:50] + "..." if len(p.description) > 50 else p.description,
+            f"⭐ {p.rating}",
+            f"{p.downloads:,}",
+            status
+        )
+
+    console.print(table)
+    console.print(f"\n[dim]Use 'cray plugin info <name>' for details[/dim]")
+
+
+@plugin.command("info")
+@click.argument("name")
+def plugin_info(name: str):
+    """Show detailed information about a plugin."""
+    from cray.plugins.market import PluginMarket
+
+    market = PluginMarket()
+    info = market.get_info(name)
+
+    if not info:
+        console.print(f"[red]Plugin '{name}' not found[/red]")
+        sys.exit(1)
+
+    status = "[green]installed[/green]" if info.installed else "[yellow]not installed[/yellow]"
+
+    console.print(Panel(
+        f"[bold cyan]{info.name}[/bold cyan] v{info.version}\n"
+        f"\n{info.description}\n"
+        f"\n[dim]Author:[/dim] {info.author}\n"
+        f"[dim]License:[/dim] {info.license}\n"
+        f"[dim]Rating:[/dim] ⭐ {info.rating} ({info.downloads:,} downloads)\n"
+        f"[dim]Status:[/dim] {status}",
+        title="📦 Plugin Info"
+    ))
+
+    if info.keywords:
+        console.print(f"\n[bold]Keywords:[/bold] {', '.join(info.keywords)}")
+
+    if info.actions:
+        console.print("\n[bold]Actions:[/bold]")
+        for action in info.actions:
+            console.print(f"  • {action}")
+
+    if info.dependencies:
+        console.print(f"\n[bold]Dependencies:[/bold] {', '.join(info.dependencies)}")
+
+    if info.installed:
+        console.print(f"\n[green]✓ Installed (v{info.installed_version})[/green]")
+    else:
+        console.print(f"\n[dim]Install with: cray plugin install {name}[/dim]")
+
+
+@plugin.command("install")
+@click.argument("name")
+@click.option("--version", "-v", help="Specific version to install")
+@click.option("--force", "-f", is_flag=True, help="Force reinstall")
+def plugin_install(name: str, version: Optional[str], force: bool):
+    """Install a plugin from the marketplace."""
+    from cray.plugins.market import PluginMarket
+
+    market = PluginMarket()
+
+    console.print(f"[cyan]Installing plugin '{name}'...[/cyan]")
+
+    if market.install(name, version, force):
+        console.print(f"[green]✓[/green] Plugin '{name}' installed successfully")
+    else:
+        console.print(f"[red]✗[/red] Failed to install plugin '{name}'")
+        sys.exit(1)
+
+
+@plugin.command("uninstall")
+@click.argument("name")
+def plugin_uninstall(name: str):
+    """Uninstall a plugin."""
+    from cray.plugins.market import PluginMarket
+
+    market = PluginMarket()
+
+    if market.uninstall(name):
+        console.print(f"[green]✓[/green] Plugin '{name}' uninstalled")
+    else:
+        console.print(f"[red]✗[/red] Failed to uninstall plugin '{name}'")
+        sys.exit(1)
+
+
+@plugin.command("update")
+@click.argument("name", required=False)
+@click.option("--all", "-a", "update_all", is_flag=True, help="Update all plugins")
+def plugin_update(name: Optional[str], update_all: bool):
+    """Update installed plugins."""
+    from cray.plugins.market import PluginMarket
+
+    market = PluginMarket()
+
+    if update_all:
+        console.print("[cyan]Updating all installed plugins...[/cyan]")
+        results = market.update_all()
+
+        for plugin_name, success in results.items():
+            status = "[green]✓[/green]" if success else "[red]✗[/red]"
+            console.print(f"  {status} {plugin_name}")
+
+    elif name:
+        if market.update(name):
+            console.print(f"[green]✓[/green] Plugin '{name}' updated")
+        else:
+            console.print(f"[red]✗[/red] Failed to update plugin '{name}'")
+            sys.exit(1)
+    else:
+        console.print("[red]Error:[/red] Specify a plugin name or use --all")
+        sys.exit(1)
+
+
+@plugin.command("list")
+@click.option("--installed", "-i", "only_installed", is_flag=True, help="Show only installed")
+def plugin_list(only_installed: bool):
+    """List plugins."""
+    from cray.plugins.market import PluginMarket
+
+    market = PluginMarket()
+
+    if only_installed:
+        installed = market.list_installed()
+
+        if not installed:
+            console.print("[yellow]No plugins installed[/yellow]")
+            return
+
+        table = Table(title="Installed Plugins")
+        table.add_column("Name", style="cyan")
+        table.add_column("Version", style="green")
+        table.add_column("Description", style="white")
+
+        for name, manifest in installed.items():
+            desc = manifest.description[:40] + "..." if len(manifest.description) > 40 else manifest.description
+            table.add_row(name, manifest.version, desc)
+
+        console.print(table)
+    else:
+        # Show all available plugins
+        plugins = market.search(limit=50)
+
+        table = Table(title="Available Plugins")
+        table.add_column("Name", style="cyan")
+        table.add_column("Version", style="green")
+        table.add_column("Description", style="white")
+        table.add_column("Status", style="magenta")
+
+        for p in plugins:
+            status = "[green]installed[/green]" if p.installed else ""
+            desc = p.description[:40] + "..." if len(p.description) > 40 else p.description
+            table.add_row(p.name, p.version, desc, status)
+
+        console.print(table)
+
+
 if __name__ == "__main__":
     main()
