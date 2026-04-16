@@ -1,0 +1,78 @@
+# Database Workflow Example
+# Demonstrates database operations using pydtc
+
+name: database-example
+description: Example workflow showing database operations
+
+steps:
+  # Step 1: Connect to MySQL database
+  - name: connect-mysql
+    plugin: database
+    action: connect
+    params:
+      db_type: mysql
+      host: localhost
+      port: 3306
+      database: testdb
+      user: root
+      password: secret
+      connection_name: mydb
+
+  # Step 2: Create a table
+  - name: create-table
+    plugin: database
+    action: execute
+    params:
+      connection_name: mydb
+      sql: |
+        CREATE TABLE IF NOT EXISTS users (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          name VARCHAR(100),
+          email VARCHAR(100),
+          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+
+  # Step 3: Insert data
+  - name: insert-users
+    plugin: database
+    action: insert
+    params:
+      connection_name: mydb
+      table: users
+      data:
+        - name: Alice
+          email: alice@example.com
+        - name: Bob
+          email: bob@example.com
+        - name: Charlie
+          email: charlie@example.com
+
+  # Step 4: Query data
+  - name: query-users
+    plugin: database
+    action: query
+    params:
+      connection_name: mydb
+      sql: "SELECT * FROM users WHERE name LIKE 'A%'"
+
+  # Step 5: List tables
+  - name: list-tables
+    plugin: database
+    action: list_tables
+    params:
+      connection_name: mydb
+
+  # Step 6: Describe table
+  - name: describe-users
+    plugin: database
+    action: describe_table
+    params:
+      connection_name: mydb
+      table: users
+
+  # Step 7: Disconnect
+  - name: disconnect
+    plugin: database
+    action: disconnect
+    params:
+      connection_name: mydb

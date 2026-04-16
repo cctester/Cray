@@ -45,8 +45,12 @@ web = [
 schedule = [
     "apscheduler>=3.10.0",
 ]
+database = [
+    "pydtc>=0.8.4",
+    "pandas>=2.0.0",
+]
 all = [
-    "cray[web,schedule]",
+    "cray[web,schedule,database]",
 ]
 
 [project.scripts]

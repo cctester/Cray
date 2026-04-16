@@ -55,7 +55,7 @@ class PluginManager:
         from cray.plugins.builtin import (
             ShellPlugin, HttpPlugin, FilePlugin,
             EmailPlugin, JsonPlugin, NotifyPlugin,
-            MathPlugin, TextPlugin,
+            MathPlugin, TextPlugin, DatabasePlugin,
         )
 
         self.register(ShellPlugin())
@@ -66,6 +66,7 @@ class PluginManager:
         self.register(NotifyPlugin())
         self.register(MathPlugin())
         self.register(TextPlugin())
+        self.register(DatabasePlugin())
 
     def register(self, plugin: Plugin) -> None:
         """Register a plugin."""

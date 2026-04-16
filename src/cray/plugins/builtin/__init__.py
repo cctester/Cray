@@ -10,14 +10,16 @@ from cray.plugins.builtin.json_ import JsonPlugin
 from cray.plugins.builtin.notify import NotifyPlugin
 from cray.plugins.builtin.math_ import MathPlugin
 from cray.plugins.builtin.text import TextPlugin
+from cray.plugins.builtin.database import DatabasePlugin
 
 __all__ = [
     "ShellPlugin",
-    "HttpPlugin", 
+    "HttpPlugin",
     "FilePlugin",
     "EmailPlugin",
     "JsonPlugin",
     "NotifyPlugin",
     "MathPlugin",
     "TextPlugin",
+    "DatabasePlugin",
 ]
