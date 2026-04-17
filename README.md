@@ -115,6 +115,268 @@ API Documentation: http://localhost:8000/docs
 | **notify** | `slack`, `discord`, `telegram`, `webhook`, `desktop` | Send notifications |
 | **math** | `calculate`, `sum`, `average`, `min`, `max`, `round`, `random`, `format` | Math operations |
 | **text** | `format`, `replace`, `regex`, `split`, `join`, `upper`, `lower`, `capitalize`, `trim`, `template` | Text manipulation |
+| **database** | `connect`, `disconnect`, `query`, `insert`, `update`, `delete`, `execute`, `load_temp`, `list_tables`, `describe_table` | Database operations (MySQL, PostgreSQL, Oracle, Hive, SQLite) |
+
+## Use Cases
+
+### 📊 Data Processing Pipelines
+
+Build ETL (Extract, Transform, Load) workflows to move data between systems:
+
+```yaml
+name: daily-etl
+description: Extract data from MySQL, transform, load to PostgreSQL
+
+steps:
+  - name: extract
+    plugin: database
+    action: query
+    params:
+      db_type: mysql
+      host: source-db.example.com
+      sql: "SELECT * FROM orders WHERE date = CURDATE()"
+
+  - name: transform
+    plugin: json
+    action: transform
+    params:
+      data: "{{ steps.extract.data }}"
+      operations:
+        - operation: map
+          field: amount
+          expr: "float(x) * 1.1"  # Add 10% markup
+
+  - name: load
+    plugin: database
+    action: load_temp
+    params:
+      db_type: postgresql
+      host: warehouse.example.com
+      table: staging_orders
+      data: "{{ steps.transform.result }}"
+```
+
+### 🔧 DevOps Automation
+
+Automate routine operations and monitoring:
+
+```yaml
+name: server-health-check
+description: Check server health and alert on issues
+
+steps:
+  - name: check-disk
+    plugin: shell
+    action: exec
+    params:
+      command: df -h / | tail -1 | awk '{print $5}' | tr -d '%'
+
+  - name: check-memory
+    plugin: shell
+    action: exec
+    params:
+      command: free | grep Mem | awk '{printf "%.1f", $3/$2 * 100}'
+
+  - name: alert-if-needed
+    plugin: notify
+    action: slack
+    params:
+      webhook: ${SLACK_WEBHOOK}
+      message: |
+        ⚠️ Server Alert
+        Disk: {{ steps.check-disk.stdout }}%
+        Memory: {{ steps.check-memory.stdout }}%
+      condition: "{{ steps.check-disk.stdout | int > 80 or steps.check-memory.stdout | float > 90 }}"
+```
+
+### 🔗 API Integration
+
+Connect multiple APIs and aggregate data:
+
+```yaml
+name: api-aggregation
+description: Fetch data from multiple APIs and combine
+
+steps:
+  - name: get-users
+    plugin: http
+    action: get
+    params:
+      url: https://api.example.com/users
+
+  - name: get-orders
+    plugin: http
+    action: get
+    params:
+      url: https://api.example.com/orders
+
+  - name: combine-data
+    plugin: json
+    action: merge
+    params:
+      sources:
+        - "{{ steps.get-users.body }}"
+        - "{{ steps.get-orders.body }}"
+
+  - name: save-report
+    plugin: file
+    action: write
+    params:
+      path: ./reports/daily-{{ input.date }}.json
+      content: "{{ steps.combine-data.result | tojson }}"
+```
+
+### 📧 Automated Reporting
+
+Generate and distribute reports on schedule:
+
+```yaml
+name: weekly-report
+description: Generate weekly report and email to stakeholders
+
+triggers:
+  - schedule: "0 9 * * 1"  # Monday 9 AM
+
+steps:
+  - name: query-sales
+    plugin: database
+    action: query
+    params:
+      connection_name: analytics
+      sql: |
+        SELECT product, SUM(quantity) as units, SUM(revenue) as total
+        FROM sales
+        WHERE week = LAST_WEEK()
+        GROUP BY product
+
+  - name: format-report
+    plugin: text
+    action: template
+    params:
+      template: |
+        # Weekly Sales Report
+
+        Total Products: {{ steps.query-sales.row_count }}
+
+        {% for row in steps.query-sales.data %}
+        - {{ row.product }}: {{ row.units }} units, ${{ row.total }}
+        {% endfor %}
+
+  - name: send-email
+    plugin: email
+    action: send
+    params:
+      to: team@company.com
+      subject: "Weekly Sales Report - {{ input.date }}"
+      body: "{{ steps.format-report.result }}"
+```
+
+### 🤖 CI/CD Auxiliary Tasks
+
+Support deployment pipelines with notifications and cleanup:
+
+```yaml
+name: post-deploy
+description: Post-deployment tasks
+
+steps:
+  - name: notify-deploy
+    plugin: notify
+    action: discord
+    params:
+      webhook: ${DISCORD_WEBHOOK}
+      message: "🚀 Deployment {{ input.version }} completed on {{ input.env }}"
+
+  - name: run-migrations
+    plugin: database
+    action: execute
+    params:
+      connection_name: app-db
+      sql: "UPDATE schema_version SET version = '{{ input.version }}'"
+
+  - name: cleanup-old-backups
+    plugin: shell
+    action: exec
+    params:
+      command: find /backups -type f -mtime +30 -delete
+
+  - name: health-check
+    plugin: http
+    action: get
+    params:
+      url: https://{{ input.env }}.example.com/health
+      expected_status: 200
+```
+
+### 📁 File Processing
+
+Batch process files with transformations:
+
+```yaml
+name: process-csv-files
+description: Process uploaded CSV files
+
+steps:
+  - name: list-files
+    plugin: file
+    action: list
+    params:
+      path: ./uploads
+      pattern: "*.csv"
+
+  - name: process-each
+    plugin: shell
+    action: script
+    params:
+      script: |
+        for file in {{ steps.list-files.files | join(' ') }}; do
+          python process.py "$file" --output ./processed/
+        done
+
+  - name: archive-originals
+    plugin: file
+    action: copy
+    params:
+      src: ./uploads
+      dst: ./archive/{{ input.date }}
+```
+
+### 🔔 Monitoring & Alerting
+
+Monitor systems and send alerts:
+
+```yaml
+name: website-monitor
+description: Monitor website uptime
+
+triggers:
+  - interval: 300  # Every 5 minutes
+
+steps:
+  - name: check-site
+    plugin: http
+    action: get
+    params:
+      url: https://mywebsite.com
+      timeout: 10
+
+  - name: alert-on-failure
+    plugin: notify
+    action: telegram
+    params:
+      bot_token: ${TELEGRAM_BOT}
+      chat_id: ${TELEGRAM_CHAT}
+      message: "🚨 Website check failed: {{ steps.check-site.error }}"
+      condition: "{{ not steps.check-site.success }}"
+
+  - name: log-status
+    plugin: file
+    action: write
+    params:
+      path: ./logs/uptime.log
+      content: "{{ input.time }} - {{ steps.check-site.status_code }}"
+      mode: append
+```
 
 ## Workflow Reference
 
@@ -207,7 +469,7 @@ pytest --cov=cray
 
 | Plugin | Description | Priority |
 |--------|-------------|----------|
-| **database** | SQLite, PostgreSQL, MySQL operations | High |
+| ~~**database**~~ | SQLite, PostgreSQL, MySQL, Oracle, Hive | ✅ Done |
 | **aws** | AWS S3, EC2, Lambda integrations | High |
 | **git** | Git clone, commit, push, pull operations | High |
 | **docker** | Docker container management | Medium |
