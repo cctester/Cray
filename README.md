@@ -116,6 +116,7 @@ API Documentation: http://localhost:8000/docs
 | **math** | `calculate`, `sum`, `average`, `min`, `max`, `round`, `random`, `format` | Math operations |
 | **text** | `format`, `replace`, `regex`, `split`, `join`, `upper`, `lower`, `capitalize`, `trim`, `template` | Text manipulation |
 | **database** | `connect`, `disconnect`, `query`, `insert`, `update`, `delete`, `execute`, `load_temp`, `list_tables`, `describe_table` | Database operations (MySQL, PostgreSQL, Oracle, Hive, SQLite) |
+| **git** | `clone`, `init`, `status`, `add`, `rm`, `commit`, `push`, `pull`, `fetch`, `branch`, `checkout`, `merge`, `tag`, `log`, `diff`, `remote`, `reset`, `stash`, `config` | Git repository operations |
 
 ## Use Cases
 
@@ -470,8 +471,8 @@ pytest --cov=cray
 | Plugin | Description | Priority |
 |--------|-------------|----------|
 | ~~**database**~~ | SQLite, PostgreSQL, MySQL, Oracle, Hive | ✅ Done |
+| ~~**git**~~ | Git clone, commit, push, pull, branch, tag | ✅ Done |
 | **aws** | AWS S3, EC2, Lambda integrations | High |
-| **git** | Git clone, commit, push, pull operations | High |
 | **docker** | Docker container management | Medium |
 | **redis** | Redis cache and queue operations | Medium |
 | **csv** | CSV file read, write, transform | Medium |

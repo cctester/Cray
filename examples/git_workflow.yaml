@@ -1,0 +1,133 @@
+# Git Workflow Example
+# Demonstrates git operations
+
+name: git-example
+description: Example workflow showing git operations
+
+steps:
+  # Clone a repository
+  - name: clone-repo
+    plugin: git
+    action: clone
+    params:
+      url: https://github.com/user/example-repo.git
+      path: ./example-repo
+      branch: main
+      depth: 1
+
+  # Check status
+  - name: check-status
+    plugin: git
+    action: status
+    params:
+      path: ./example-repo
+      short: true
+
+  # View recent commits
+  - name: view-log
+    plugin: git
+    action: log
+    params:
+      path: ./example-repo
+      count: 5
+      oneline: true
+
+  # List branches
+  - name: list-branches
+    plugin: git
+    action: branch
+    params:
+      path: ./example-repo
+      action: list
+
+  # Create a new branch
+  - name: create-branch
+    plugin: git
+    action: branch
+    params:
+      path: ./example-repo
+      action: create
+      name: feature/test-branch
+
+  # Checkout the new branch
+  - name: checkout-branch
+    plugin: git
+    action: checkout
+    params:
+      path: ./example-repo
+      branch: feature/test-branch
+
+  # Make a change (using shell)
+  - name: make-change
+    plugin: shell
+    action: exec
+    params:
+      command: echo "# Test change" >> ./example-repo/README.md
+
+  # Stage changes
+  - name: stage-changes
+    plugin: git
+    action: add
+    params:
+      path: ./example-repo
+      files: ["README.md"]
+
+  # Commit changes
+  - name: commit-changes
+    plugin: git
+    action: commit
+    params:
+      path: ./example-repo
+      message: "Add test change"
+      author: "Cray Bot"
+      email: "bot@cray.dev"
+
+  # View diff
+  - name: show-diff
+    plugin: git
+    action: diff
+    params:
+      path: ./example-repo
+      staged: true
+
+  # List tags
+  - name: list-tags
+    plugin: git
+    action: tag
+    params:
+      path: ./example-repo
+      action: list
+
+  # List remotes
+  - name: list-remotes
+    plugin: git
+    action: remote
+    params:
+      path: ./example-repo
+      action: list
+
+  # Get config
+  - name: get-config
+    plugin: git
+    action: config
+    params:
+      path: ./example-repo
+      action: get
+      key: user.name
+
+  # Cleanup: checkout main and delete test branch
+  - name: cleanup-checkout
+    plugin: git
+    action: checkout
+    params:
+      path: ./example-repo
+      branch: main
+
+  - name: delete-branch
+    plugin: git
+    action: branch
+    params:
+      path: ./example-repo
+      action: delete
+      name: feature/test-branch
+      force: true

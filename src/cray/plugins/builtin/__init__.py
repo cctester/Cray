@@ -11,6 +11,7 @@ from cray.plugins.builtin.notify import NotifyPlugin
 from cray.plugins.builtin.math_ import MathPlugin
 from cray.plugins.builtin.text import TextPlugin
 from cray.plugins.builtin.database import DatabasePlugin
+from cray.plugins.builtin.git import GitPlugin
 
 __all__ = [
     "ShellPlugin",
@@ -22,4 +23,5 @@ __all__ = [
     "MathPlugin",
     "TextPlugin",
     "DatabasePlugin",
+    "GitPlugin",
 ]
