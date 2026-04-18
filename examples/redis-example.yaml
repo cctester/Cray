@@ -1,0 +1,47 @@
+name: redis-example
+description: Example workflow using Redis plugin
+
+steps:
+  - name: connect
+    plugin: redis
+    action: connect
+    params:
+      host: localhost
+      port: 6379
+      connection_name: my-redis
+
+  - name: set-key
+    plugin: redis
+    action: set
+    params:
+      connection_name: my-redis
+      key: test-key
+      value: "Hello from Cray! 🦞"
+      expire: 3600
+
+  - name: get-key
+    plugin: redis
+    action: get
+    params:
+      connection_name: my-redis
+      key: test-key
+
+  - name: check-exists
+    plugin: redis
+    action: exists
+    params:
+      connection_name: my-redis
+      key: test-key
+
+  - name: delete-key
+    plugin: redis
+    action: delete
+    params:
+      connection_name: my-redis
+      key: test-key
+
+  - name: disconnect
+    plugin: redis
+    action: disconnect
+    params:
+      connection_name: my-redis
