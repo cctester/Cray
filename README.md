@@ -472,7 +472,7 @@ pytest --cov=cray
 |--------|-------------|----------|
 | ~~**database**~~ | SQLite, PostgreSQL, MySQL, Oracle, Hive | ✅ Done |
 | ~~**git**~~ | Git clone, commit, push, pull, branch, tag | ✅ Done |
-| **aws** | AWS S3, EC2, Lambda integrations | High |
+| ~~**aws**~~ | AWS S3, EC2, Lambda integrations | ✅ Done |
 | **docker** | Docker container management | Medium |
 | ~~**redis**~~ | Redis cache and queue operations | ✅ Done |
 | **csv** | CSV file read, write, transform | Medium |
