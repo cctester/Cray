@@ -16,8 +16,8 @@ from pydantic import BaseModel
 import uvicorn
 from loguru import logger
 
-from cray.core import Workflow, WorkflowRunner
-from cray.plugins import PluginRegistry
+from cray.core import Workflow, Runner as WorkflowRunner
+from cray.plugins import PluginManager
 
 
 # Models
@@ -52,7 +52,6 @@ websocket_clients: List[WebSocket] = []
 
 def create_app(workflows_dir: str = "./workflows") -> FastAPI:
     """Create FastAPI application."""
-    
     app = FastAPI(title="Cray API", version="1.0.0")
     
     # Load workflows
@@ -148,14 +147,14 @@ def create_app(workflows_dir: str = "./workflows") -> FastAPI:
     @app.get("/api/plugins")
     async def list_plugins():
         """List available plugins."""
-        registry = PluginRegistry()
+        manager = PluginManager()
         return [
             {
-                "name": p.name,
-                "description": p.description,
+                "name": name,
+                "description": desc,
                 "version": "1.0.0",
             }
-            for p in registry._plugins.values()
+            for name, desc in manager.list_plugins().items()
         ]
 
     # Secrets Management API
@@ -422,21 +421,26 @@ def create_app(workflows_dir: str = "./workflows") -> FastAPI:
             return data
 
         # Health check endpoint
-        @app.get("/api/health")
-        async def health_check():
-            """Health check endpoint."""
-            return {"status": "healthy", "service": "cray-api"}
+    @app.get("/api/health")
+    async def health_check():
+        """Health check endpoint."""
+        return {"status": "healthy", "service": "cray-api"}
 
-        # Serve dashboard
-    dashboard_path = Path(__file__).parent.parent.parent / "dashboard" / "dist"
+    # Serve dashboard
+    dashboard_path = Path(__file__).parent.parent.parent.parent / "dashboard" / "dist"
     if dashboard_path.exists():
         app.mount("/assets", StaticFiles(directory=dashboard_path / "assets"), name="assets")
-        
+
+        @app.get("/")
+        async def serve_root():
+            """Serve dashboard root."""
+            return FileResponse(dashboard_path / "index.html")
+
         @app.get("/{path:path}")
         async def serve_dashboard(path: str):
             """Serve dashboard for all non-API routes."""
             return FileResponse(dashboard_path / "index.html")
-    
+
     return app
 
 

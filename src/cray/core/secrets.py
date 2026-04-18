@@ -13,12 +13,13 @@ Storage backends:
 - HashiCorp Vault (optional)
 """
 
+from __future__ import annotations
 import os
 import json
 import hashlib
 import base64
 from pathlib import Path
-from typing import Dict, Optional, Any
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 from enum import Enum
 from loguru import logger
@@ -47,7 +48,7 @@ class SecretMetadata:
     created_at: str
     updated_at: str
     backend: SecretBackend
-    tags: list[str]
+    tags: List[str]
 
 
 class SecretsManager:
@@ -210,7 +211,7 @@ class SecretsManager:
         self,
         name: str,
         value: str,
-        tags: Optional[list[str]] = None
+tags: Optional[List[str]] = None
     ) -> None:
         """
         Store a secret.
@@ -292,7 +293,7 @@ class SecretsManager:
         
         return False
     
-    def list(self) -> list[SecretMetadata]:
+    def list(self) -> List[SecretMetadata]:
         """
         List all stored secrets.
         
@@ -373,6 +374,7 @@ def get_secret(name: str, default: Optional[str] = None) -> Optional[str]:
     return get_secrets_manager().get(name, default)
 
 
-def set_secret(name: str, value: str, tags: Optional[list[str]] = None) -> None:
+def set_secret(name: str, value: str, tags: Optional[List[str]] = None) -> None:
+    pass
     """Convenience function to set a secret."""
     get_secrets_manager().set(name, value, tags)

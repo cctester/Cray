@@ -19,8 +19,8 @@ A lightweight automation tool with claws.
 # Basic installation
 pip install cray
 
-# With web support
-pip install cray[web]
+# With full features (web, scheduler, database, aws)
+pip install cray[all]
 
 # With scheduling support
 pip install cray[schedule]
@@ -81,7 +81,7 @@ cray schedule remove <job_id>
 cray serve --port 8000
 ```
 
-## Web API
+## Web API & Dashboard
 
 Start the server:
 
@@ -89,17 +89,37 @@ Start the server:
 cray serve --host 0.0.0.0 --port 8000
 ```
 
-API Endpoints:
+This starts both the REST API and the web dashboard.
+
+### Dashboard
+
+Open http://localhost:8000/ in your browser to access the web dashboard. It provides:
+
+- Workflow management UI
+- Real-time run monitoring
+- Metrics and analytics
+- Plugin management
+
+### API Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/` | GET | API info |
-| `/workflows` | GET, POST | List/create workflows |
-| `/workflows/{name}` | GET, DELETE | Get/delete workflow |
-| `/workflows/{name}/run` | POST | Run a workflow |
-| `/tasks` | GET | List recent tasks |
-| `/tasks/{id}` | GET | Get task details |
-| `/plugins` | GET | List plugins |
+| `/` | GET | Dashboard (web UI) |
+| `/api/health` | GET | Health check |
+| `/api/workflows` | GET | List workflows |
+| `/api/workflows` | POST | Create workflow |
+| `/api/workflows/{name}` | GET | Get workflow |
+| `/api/workflows/{name}` | DELETE | Delete workflow |
+| `/api/workflows/{name}/run` | POST | Run workflow |
+| `/api/runs` | GET | List runs |
+| `/api/runs/{id}` | GET | Get run details |
+| `/api/runs/{id}/stop` | POST | Stop run |
+| `/api/plugins` | GET | List plugins |
+| `/api/secrets` | GET | List secrets (metadata) |
+| `/api/secrets/{name}` | GET, PUT, DELETE | Manage secret |
+| `/api/metrics/summary` | GET | Metrics summary |
+| `/api/metrics/workflows` | GET | Workflow metrics |
+| `/ws` | WebSocket | Real-time updates |
 
 API Documentation: http://localhost:8000/docs
 

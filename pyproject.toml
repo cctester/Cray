@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Cray - A lightweight automation tool with claws"
 readme = "README.md"
 license = {text = "MIT"}
-requires-python = ">=3.10"
+requires-python = ">=3.8"
 authors = [
     {name = "Your Name", email = "your@email.com"}
 ]
@@ -30,6 +30,7 @@ dependencies = [
     "websockets>=12.0",
     "aiohttp>=3.9.0",
     "boto3>=1.34.0",
+    "redis>=5.0.0",
 ]
 
 [project.optional-dependencies]
@@ -39,10 +40,6 @@ dev = [
     "pytest-cov>=4.0.0",
     "httpx>=0.24.0",
 ]
-web = [
-    "fastapi>=0.100.0",
-    "uvicorn>=0.23.0",
-]
 schedule = [
     "apscheduler>=3.10.0",
 ]
@@ -50,11 +47,8 @@ database = [
     "pydtc>=0.8.4",
     "pandas>=2.0.0",
 ]
-aws = [
-    "boto3>=1.34.0",
-]
 all = [
-    "cray[web,schedule,database,aws]",
+    "cray[schedule,database]",
 ]
 
 [project.scripts]

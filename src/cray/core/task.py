@@ -2,9 +2,10 @@
 Task definition and status management.
 """
 
+from __future__ import annotations
 from enum import Enum
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 import uuid
 
@@ -42,7 +43,7 @@ class Task(BaseModel):
     input: Dict[str, Any] = Field(default_factory=dict)
     output: Dict[str, Any] = Field(default_factory=dict)
     error: Optional[str] = None
-    results: list[TaskResult] = Field(default_factory=list)
+    results: List[TaskResult] = Field(default_factory=list)
     
     def start(self) -> None:
         """Mark task as started."""
