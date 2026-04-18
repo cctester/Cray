@@ -1,16 +1,16 @@
 <script setup lang="ts">
-import { computed } from 'vue'
 import { useRoute } from 'vue-router'
+import { computed } from 'vue'
 
 const route = useRoute()
 
 const navItems = [
-  { path: '/', icon: 'home', label: 'Dashboard' },
-  { path: '/workflows', icon: 'workflow', label: 'Workflows' },
-  { path: '/runs', icon: 'history', label: 'Runs' },
-  { path: '/plugins', icon: 'plugin', label: 'Plugins' },
-  { path: '/editor', icon: 'editor', label: 'Editor' },
-  { path: '/settings', icon: 'settings', label: 'Settings' },
+  { path: '/', icon: '📊', label: 'Dashboard' },
+  { path: '/workflows', icon: '📋', label: 'Workflows' },
+  { path: '/runs', icon: '▶️', label: 'Runs' },
+  { path: '/plugins', icon: '🔌', label: 'Plugins' },
+  { path: '/editor', icon: '✏️', label: 'Editor' },
+  { path: '/settings', icon: '⚙️', label: 'Settings' },
 ]
 
 const isActive = (path: string) => {
@@ -21,13 +21,15 @@ const isActive = (path: string) => {
 
 <template>
   <aside class="sidebar">
-    <div class="logo">
-      <span class="logo-icon">🦞</span>
-      <span class="logo-text">Cray</span>
+    <div class="sidebar-header">
+      <div class="logo">
+        <span class="logo-icon">🦞</span>
+        <span class="logo-text">Cray</span>
+      </div>
     </div>
 
-    <nav class="nav">
-      <router-link
+    <nav class="sidebar-nav">
+      <router-link 
         v-for="item in navItems"
         :key="item.path"
         :to="item.path"
@@ -47,23 +49,26 @@ const isActive = (path: string) => {
 
 <style scoped>
 .sidebar {
-  position: fixed;
-  left: 0;
-  top: 0;
-  bottom: 0;
   width: 240px;
+  height: 100vh;
   background: var(--bg-secondary);
   border-right: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
+  position: fixed;
+  left: 0;
+  top: 0;
+}
+
+.sidebar-header {
+  padding: 20px;
+  border-bottom: 1px solid var(--border-color);
 }
 
 .logo {
-  padding: 20px;
   display: flex;
   align-items: center;
   gap: 12px;
-  border-bottom: 1px solid var(--border-color);
 }
 
 .logo-icon {
@@ -72,11 +77,11 @@ const isActive = (path: string) => {
 
 .logo-text {
   font-size: 20px;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--text-primary);
 }
 
-.nav {
+.sidebar-nav {
   flex: 1;
   padding: 16px 12px;
   display: flex;
@@ -90,8 +95,8 @@ const isActive = (path: string) => {
   gap: 12px;
   padding: 12px 16px;
   border-radius: 8px;
-  color: var(--text-secondary);
   text-decoration: none;
+  color: var(--text-secondary);
   transition: all 0.2s;
 }
 
@@ -115,13 +120,12 @@ const isActive = (path: string) => {
 }
 
 .sidebar-footer {
-  padding: 16px;
+  padding: 16px 20px;
   border-top: 1px solid var(--border-color);
 }
 
 .version {
   font-size: 12px;
   color: var(--text-muted);
-  text-align: center;
 }
 </style>

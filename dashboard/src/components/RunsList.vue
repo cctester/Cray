@@ -1,56 +1,73 @@
 <script setup lang="ts">
-import type { WorkflowRun } from '../types'
+import { computed } from 'vue'
+import type { WorkflowRun } from '../stores/workflow'
 
-defineProps<{
+const props = defineProps<{
   runs: WorkflowRun[]
 }>()
 
-const statusColors: Record<string, string> = {
-  pending: '#6b7280',
-  running: '#3b82f6',
-  success: '#10b981',
-  failed: '#ef4444',
-  stopped: '#f59e0b',
+function getStatusColor(status: string) {
+  const colors: Record<string, string> = {
+    pending: '#6b7280',
+    running: '#3b82f6',
+    success: '#10b981',
+    failed: '#ef4444',
+    stopped: '#f59e0b',
+  }
+  return colors[status] || '#6b7280'
 }
 
-function formatDate(date: string) {
-  return new Date(date).toLocaleString()
+function getStatusIcon(status: string) {
+  const icons: Record<string, string> = {
+    pending: '⏳',
+    running: '🔄',
+    success: '✅',
+    failed: '❌',
+    stopped: '⏹️',
+  }
+  return icons[status] || '❓'
 }
 
-function formatDuration(ms: number) {
+function formatDuration(ms?: number) {
   if (!ms) return '-'
   if (ms < 1000) return `${ms}ms`
   if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`
   return `${(ms / 60000).toFixed(1)}m`
 }
+
+function formatDate(date: string) {
+  return new Date(date).toLocaleString('zh-CN', {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
 </script>
 
 <template>
   <div class="runs-list">
-    <div v-if="runs.length === 0" class="empty-state">
-      No runs yet
-    </div>
-
-    <div v-else class="runs-items">
-      <router-link
-        v-for="run in runs"
-        :key="run.id"
-        :to="`/runs/${run.id}`"
-        class="run-item"
+    <div 
+      v-for="run in runs" 
+      :key="run.id"
+      class="run-item"
+    >
+      <div 
+        class="run-status"
+        :style="{ background: getStatusColor(run.status) }"
       >
-        <div class="run-status" :style="{ background: statusColors[run.status] }">
-          {{ run.status === 'running' ? '▶' : run.status === 'success' ? '✓' : run.status === 'failed' ? '✗' : '○' }}
-        </div>
-
-        <div class="run-info">
-          <div class="run-name">{{ run.workflow_name }}</div>
-          <div class="run-time">{{ formatDate(run.started_at) }}</div>
-        </div>
-
-        <div class="run-duration">
-          {{ formatDuration(run.duration || 0) }}
-        </div>
-      </router-link>
+        {{ getStatusIcon(run.status) }}
+      </div>
+      <div class="run-info">
+        <h4 class="run-workflow">{{ run.workflow_name }}</h4>
+        <p class="run-time">{{ formatDate(run.started_at) }}</p>
+      </div>
+      <div class="run-duration">
+        {{ formatDuration(run.duration) }}
+      </div>
+    </div>
+    <div v-if="!runs.length" class="empty">
+      No runs yet
     </div>
   </div>
 </template>
@@ -62,12 +79,6 @@ function formatDuration(ms: number) {
   gap: 8px;
 }
 
-.empty-state {
-  text-align: center;
-  padding: 40px;
-  color: var(--text-muted);
-}
-
 .run-item {
   display: flex;
   align-items: center;
@@ -75,7 +86,7 @@ function formatDuration(ms: number) {
   padding: 12px;
   background: var(--bg-primary);
   border-radius: 8px;
-  text-decoration: none;
+  cursor: pointer;
   transition: all 0.2s;
 }
 
@@ -84,14 +95,13 @@ function formatDuration(ms: number) {
 }
 
 .run-status {
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 6px;
-  color: white;
-  font-size: 14px;
+  font-size: 16px;
 }
 
 .run-info {
@@ -99,10 +109,11 @@ function formatDuration(ms: number) {
   min-width: 0;
 }
 
-.run-name {
+.run-workflow {
   font-size: 14px;
   font-weight: 500;
   color: var(--text-primary);
+  margin: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -111,12 +122,18 @@ function formatDuration(ms: number) {
 .run-time {
   font-size: 12px;
   color: var(--text-muted);
-  margin-top: 2px;
+  margin: 4px 0 0 0;
 }
 
 .run-duration {
   font-size: 13px;
   color: var(--text-secondary);
-  font-variant-numeric: tabular-nums;
+  font-family: 'Monaco', 'Menlo', monospace;
+}
+
+.empty {
+  text-align: center;
+  padding: 40px;
+  color: var(--text-muted);
 }
 </style>

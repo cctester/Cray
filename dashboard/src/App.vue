@@ -1,54 +1,27 @@
 <script setup lang="ts">
-import { useWorkflowStore } from './stores/workflow'
 import Sidebar from './components/Sidebar.vue'
-import Header from './components/Header.vue'
-
-const workflowStore = useWorkflowStore()
 </script>
 
 <template>
-  <div class="app">
+  <div class="app-layout">
     <Sidebar />
-    <main class="main">
-      <Header />
-      <div class="content">
-        <router-view v-slot="{ Component }">
-          <transition name="fade" mode="out-in">
-            <component :is="Component" />
-          </transition>
-        </router-view>
-      </div>
+    <main class="main-content">
+      <router-view />
     </main>
   </div>
 </template>
 
 <style scoped>
-.app {
+.app-layout {
   display: flex;
   min-height: 100vh;
-  background: var(--bg-primary);
 }
 
-.main {
+.main-content {
   flex: 1;
-  display: flex;
-  flex-direction: column;
   margin-left: 240px;
-}
-
-.content {
-  flex: 1;
   padding: 24px;
-  overflow-y: auto;
-}
-
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.2s ease;
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
+  background: var(--bg-primary);
+  min-height: 100vh;
 }
 </style>

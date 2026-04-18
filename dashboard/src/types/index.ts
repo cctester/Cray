@@ -5,7 +5,6 @@ export interface Workflow {
   description: string
   file_path: string
   steps: WorkflowStep[]
-  created_at: string
   updated_at: string
 }
 
@@ -14,52 +13,50 @@ export interface WorkflowStep {
   plugin: string
   action: string
   params: Record<string, any>
+  depends_on?: string[]
   condition?: string
-  retry?: RetryConfig
-  timeout?: number
-}
-
-export interface RetryConfig {
-  max_attempts: number
-  delay: number
-  backoff: 'fixed' | 'exponential'
+  retry?: number
+  retry_delay?: number
+  on_error?: Record<string, any>
+  continue_on_error?: boolean
 }
 
 export interface WorkflowRun {
   id: string
   workflow_id: string
   workflow_name: string
-  status: 'pending' | 'running' | 'success' | 'failed' | 'stopped'
+  status: RunStatus
   started_at: string
   completed_at?: string
   duration?: number
-  input: Record<string, any>
+  steps: RunStep[]
+  input?: Record<string, any>
   output?: Record<string, any>
-  error?: string
-  steps: StepResult[]
 }
 
-export interface StepResult {
+export type RunStatus = 'pending' | 'running' | 'success' | 'failed' | 'stopped'
+
+export interface RunStep {
   name: string
-  status: 'pending' | 'running' | 'success' | 'failed' | 'skipped'
-  started_at?: string
-  completed_at?: string
+  status: RunStatus
   duration?: number
-  output?: any
   error?: string
-  logs: LogEntry[]
+  output?: any
+  logs?: LogEntry[]
 }
 
 export interface LogEntry {
   timestamp: string
-  level: 'debug' | 'info' | 'warning' | 'error'
+  level: LogLevel
   message: string
 }
 
+export type LogLevel = 'debug' | 'info' | 'warning' | 'error'
+
 export interface Plugin {
   name: string
-  description: string
   version: string
+  description: string
   actions: PluginAction[]
 }
 
@@ -77,11 +74,18 @@ export interface PluginParam {
   description: string
 }
 
-export interface DashboardStats {
-  total_workflows: number
-  total_runs: number
-  success_rate: number
-  avg_duration: number
-  runs_today: number
-  active_runs: number
+export interface Stats {
+  workflows: number
+  runs: number
+  running: number
+  successRate: number
+}
+
+export interface Settings {
+  serverUrl: string
+  theme: 'dark' | 'light' | 'auto'
+  autoRefresh: boolean
+  refreshInterval: number
+  showNotifications: boolean
+  logLevel: LogLevel
 }
