@@ -13,6 +13,7 @@ from cray.plugins.builtin.text import TextPlugin
 from cray.plugins.builtin.database import DatabasePlugin
 from cray.plugins.builtin.git import GitPlugin
 from cray.plugins.builtin.redis_ import RedisPlugin
+from cray.plugins.builtin.aws import AWSPlugin
 
 __all__ = [
     "ShellPlugin",
@@ -26,4 +27,5 @@ __all__ = [
     "DatabasePlugin",
     "GitPlugin",
     "RedisPlugin",
+    "AWSPlugin",
 ]

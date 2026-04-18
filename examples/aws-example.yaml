@@ -1,0 +1,17 @@
+name: aws-example
+description: Example workflow using AWS plugin
+
+steps:
+  - name: s3-list-example
+    plugin: aws
+    action: s3_list
+    params:
+      bucket: my-example-bucket
+      region: us-west-2
+
+  - name: ec2-list-example
+    plugin: aws
+    action: ec2_list
+    params:
+      region: us-west-2
+      state: running

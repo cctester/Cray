@@ -56,7 +56,7 @@ class PluginManager:
             ShellPlugin, HttpPlugin, FilePlugin,
             EmailPlugin, JsonPlugin, NotifyPlugin,
             MathPlugin, TextPlugin, DatabasePlugin,
-            GitPlugin,
+            GitPlugin, RedisPlugin, AWSPlugin,
         )
 
         self.register(ShellPlugin())
@@ -69,6 +69,8 @@ class PluginManager:
         self.register(TextPlugin())
         self.register(DatabasePlugin())
         self.register(GitPlugin())
+        self.register(RedisPlugin())
+        self.register(AWSPlugin())
 
     def register(self, plugin: Plugin) -> None:
         """Register a plugin."""

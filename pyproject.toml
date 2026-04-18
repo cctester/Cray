@@ -29,6 +29,7 @@ dependencies = [
     "uvicorn>=0.27.0",
     "websockets>=12.0",
     "aiohttp>=3.9.0",
+    "boto3>=1.34.0",
 ]
 
 [project.optional-dependencies]
@@ -49,8 +50,11 @@ database = [
     "pydtc>=0.8.4",
     "pandas>=2.0.0",
 ]
+aws = [
+    "boto3>=1.34.0",
+]
 all = [
-    "cray[web,schedule,database]",
+    "cray[web,schedule,database,aws]",
 ]
 
 [project.scripts]
