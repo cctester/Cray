@@ -474,7 +474,7 @@ pytest --cov=cray
 | ~~**git**~~ | Git clone, commit, push, pull, branch, tag | ✅ Done |
 | **aws** | AWS S3, EC2, Lambda integrations | High |
 | **docker** | Docker container management | Medium |
-| **redis** | Redis cache and queue operations | Medium |
+| ~~**redis**~~ | Redis cache and queue operations | ✅ Done |
 | **csv** | CSV file read, write, transform | Medium |
 | **xml** | XML parsing and transformation | Medium |
 | **image** | Image resize, convert, watermark | Low |
