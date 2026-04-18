@@ -19,10 +19,18 @@ class Step(BaseModel):
     depends_on: List[str] = Field(default_factory=list)
     condition: Optional[str] = None
     retry: int = 0
+    retry_delay: int = 1  # seconds between retries
     timeout: int = 300
+    on_error: Optional[Dict[str, Any]] = None  # error handler
+    continue_on_error: bool = False  # continue workflow if step fails
+    max_retries: Optional[int] = None  # alias for retry, for clarity
 
     class Config:
         extra = "allow"
+
+    def get_retry_count(self) -> int:
+        """Get effective retry count."""
+        return self.max_retries if self.max_retries is not None else self.retry
 
 
 class TriggerType(str, Enum):
@@ -60,6 +68,9 @@ class Workflow(BaseModel):
     steps: List[Step] = Field(default_factory=list)
     on_success: List[Dict[str, Any]] = Field(default_factory=list)
     on_failure: List[Dict[str, Any]] = Field(default_factory=list)
+    on_error: List[Dict[str, Any]] = Field(default_factory=list)  # global error handler
+    parallel: bool = False  # enable parallel execution for independent steps
+    max_parallel: int = 10  # max concurrent steps
 
     class Config:
         extra = "allow"
@@ -100,6 +111,9 @@ class Workflow(BaseModel):
             steps=steps,
             on_success=data.get("on_success", []),
             on_failure=data.get("on_failure", []),
+            on_error=data.get("on_error", []),
+            parallel=data.get("parallel", False),
+            max_parallel=data.get("max_parallel", 10),
         )
     
     def to_yaml(self, path: str | Path) -> None:
@@ -129,6 +143,12 @@ class Workflow(BaseModel):
             data["on_success"] = self.on_success
         if self.on_failure:
             data["on_failure"] = self.on_failure
+        if self.on_error:
+            data["on_error"] = self.on_error
+        if self.parallel:
+            data["parallel"] = self.parallel
+        if self.max_parallel != 10:
+            data["max_parallel"] = self.max_parallel
 
         with open(path, "w", encoding="utf-8") as f:
             yaml.dump(data, f, default_flow_style=False, allow_unicode=True)

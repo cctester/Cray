@@ -1,0 +1,65 @@
+# Error Handling Example
+# Demonstrates retry, on_error handlers, and continue_on_error
+
+name: error-handling-demo
+description: Workflow with comprehensive error handling
+
+# Global error handler for the workflow
+on_error:
+  - log: "Workflow encountered an error"
+  - notify: "Alert: workflow failed"
+
+steps:
+  # Step with retry logic
+  - name: flaky-api-call
+    plugin: http
+    action: get
+    params:
+      url: https://httpbin.org/status/200,500,502,503
+      timeout: 10
+    retry: 3  # Retry up to 3 times
+    retry_delay: 2  # Wait 2 seconds between retries
+    on_error:
+      log: "API call failed after retries: {{ error.message }}"
+    continue_on_error: true  # Continue workflow even if this fails
+
+  # Step that depends on the flaky step
+  - name: process-result
+    plugin: json
+    action: parse
+    params:
+      data: "{{ steps.flaky-api-call.body | default('{}') }}"
+    depends_on:
+      - flaky-api-call
+    condition: "{{ steps.flaky-api-call.success }}"
+
+  # Step with custom error handler
+  - name: risky-operation
+    plugin: shell
+    action: exec
+    params:
+      command: "exit 1"  # This will fail intentionally
+    on_error:
+      log: "Risky operation failed, but we expected this"
+      notify: "Step {{ error.step }} failed: {{ error.message }}"
+    continue_on_error: true
+
+  # Cleanup step that runs regardless of previous failures
+  - name: cleanup
+    plugin: shell
+    action: exec
+    params:
+      command: echo "Cleanup complete"
+    depends_on:
+      - flaky-api-call
+      - risky-operation
+
+# Success handler
+on_success:
+  - log: "Workflow completed successfully"
+  - notify: "Workflow finished"
+
+# Failure handler (runs if workflow fails)
+on_failure:
+  - log: "Workflow failed"
+  - notify: "Workflow failed, check logs"

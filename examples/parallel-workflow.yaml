@@ -1,0 +1,65 @@
+# Parallel Execution Example
+# Demonstrates running independent steps concurrently
+
+name: parallel-data-processing
+description: Process multiple data sources in parallel
+
+# Enable parallel execution
+parallel: true
+max_parallel: 5  # Run up to 5 steps concurrently
+
+steps:
+  # These steps have no dependencies and will run in parallel
+  - name: fetch-users
+    plugin: http
+    action: get
+    params:
+      url: https://jsonplaceholder.typicode.com/users
+    timeout: 30
+
+  - name: fetch-posts
+    plugin: http
+    action: get
+    params:
+      url: https://jsonplaceholder.typicode.com/posts
+    timeout: 30
+
+  - name: fetch-comments
+    plugin: http
+    action: get
+    params:
+      url: https://jsonplaceholder.typicode.com/comments
+    timeout: 30
+
+  - name: fetch-albums
+    plugin: http
+    action: get
+    params:
+      url: https://jsonplaceholder.typicode.com/albums
+    timeout: 30
+
+  # This step depends on multiple parallel steps
+  # It will wait for all of them to complete
+  - name: aggregate-data
+    plugin: json
+    action: merge
+    params:
+      sources:
+        - users: "{{ steps.fetch-users.body }}"
+        - posts: "{{ steps.fetch-posts.body }}"
+        - comments: "{{ steps.fetch-comments.body }}"
+        - albums: "{{ steps.fetch-albums.body }}"
+    depends_on:
+      - fetch-users
+      - fetch-posts
+      - fetch-comments
+      - fetch-albums
+
+  - name: save-report
+    plugin: file
+    action: write
+    params:
+      path: ./reports/parallel-report.json
+      content: "{{ steps.aggregate-data.result | tojson }}"
+    depends_on:
+      - aggregate-data

@@ -4,7 +4,7 @@ Workflow runner - executes workflows step by step.
 
 import asyncio
 import os
-from typing import Dict, Any, Optional, Set
+from typing import Dict, Any, Optional, Set, List
 from datetime import datetime
 from loguru import logger
 
@@ -62,84 +62,204 @@ class Runner:
             if errors:
                 raise ValueError(f"Invalid step dependencies: {errors}")
 
-            # Get execution order based on dependencies
-            execution_order = dep_graph.get_execution_order()
-            step_map = {s.name: s for s in workflow.steps}
-            completed: Set[str] = set()
+            # Choose execution mode
+            if workflow.parallel:
+                await self._run_parallel(workflow, task, context, dep_graph)
+            else:
+                await self._run_sequential(workflow, task, context, dep_graph)
 
-            for step_name in execution_order:
-                step = step_map.get(step_name)
-                if not step:
-                    continue
-
-                # Check if dependencies succeeded
-                failed_deps = [
-                    dep for dep in (step.depends_on or [])
-                    if dep_graph.get_node(dep) and dep_graph.get_node(dep).status != "success"
-                ]
-
-                if failed_deps:
-                    logger.warning(
-                        f"Skipping step '{step_name}' due to failed dependencies: {failed_deps}"
-                    )
-                    result = TaskResult(
-                        step_name=step_name,
-                        success=True,
-                        output={"skipped": True, "reason": f"dependencies_failed: {failed_deps}"}
-                    )
-                    task.add_result(result)
-                    context["steps"][step_name] = result.output or {}
-                    dep_graph.mark_skipped(step_name, f"dependencies_failed: {failed_deps}")
-                    continue
-
-                dep_graph.mark_running(step_name)
-                result = await self._execute_step(step, context)
-                task.add_result(result)
-                context["steps"][step_name] = result.output or {}
-
-                if result.success:
-                    dep_graph.mark_success(step_name, result.output)
-                else:
-                    # Step failed, check retry
-                    if step.retry > 0:
-                        for attempt in range(step.retry):
-                            logger.warning(
-                                f"Retrying step '{step_name}' "
-                                f"({attempt + 1}/{step.retry})"
-                            )
-                            result = await self._execute_step(step, context)
-                            task.results[-1] = result  # Update last result
-
-                            if result.success:
-                                dep_graph.mark_success(step_name, result.output)
-                                break
-
-                    if not result.success:
-                        dep_graph.mark_failed(step_name, result.error)
-                        logger.error(f"Step '{step_name}' failed: {result.error}")
-                        task.fail(f"Step '{step_name}' failed: {result.error}")
-
-                        # Execute on_failure handlers
-                        await self._execute_callbacks(workflow.on_failure, context)
-                        return task
-
-                completed.add(step_name)
-
-            # All steps completed successfully
-            task.succeed()
-            logger.success(f"Workflow '{workflow.name}' completed successfully")
-
-            # Execute on_success handlers
-            await self._execute_callbacks(workflow.on_success, context)
+            # Check final status
+            if task.status == TaskStatus.RUNNING:
+                task.succeed()
+                logger.success(f"Workflow '{workflow.name}' completed successfully")
+                # Execute on_success handlers
+                await self._execute_callbacks(workflow.on_success, context)
 
         except Exception as e:
             logger.exception(f"Workflow execution error: {e}")
             task.fail(str(e))
+            # Execute on_failure handlers
+            await self._execute_callbacks(workflow.on_failure, context)
 
         finally:
             self._running_tasks.pop(task.id, None)
 
         return task
+
+    async def _run_sequential(
+        self,
+        workflow: Workflow,
+        task: Task,
+        context: Dict[str, Any],
+        dep_graph: DependencyGraph
+    ) -> None:
+        """Execute steps sequentially based on dependency order."""
+        execution_order = dep_graph.get_execution_order()
+        step_map = {s.name: s for s in workflow.steps}
+        completed: Set[str] = set()
+
+        for step_name in execution_order:
+            step = step_map.get(step_name)
+            if not step:
+                continue
+
+            # Check if dependencies succeeded
+            failed_deps = self._check_failed_dependencies(step, dep_graph)
+
+            if failed_deps:
+                await self._skip_step(step, step_name, task, context, dep_graph,
+                                       f"dependencies_failed: {failed_deps}")
+                continue
+
+            result = await self._execute_step_with_retry(step, context, dep_graph)
+            task.add_result(result)
+            context["steps"][step_name] = result.output or {}
+
+            if not result.success:
+                # Execute step-level on_error handler
+                if step.on_error:
+                    await self._execute_step_error_handler(step, result, context)
+
+                if not step.continue_on_error:
+                    # Execute workflow-level on_error handlers
+                    await self._execute_callbacks(workflow.on_error, context)
+                    task.fail(f"Step '{step_name}' failed: {result.error}")
+                    return
+
+            completed.add(step_name)
+
+    async def _run_parallel(
+        self,
+        workflow: Workflow,
+        task: Task,
+        context: Dict[str, Any],
+        dep_graph: DependencyGraph
+    ) -> None:
+        """Execute steps in parallel where possible."""
+        step_map = {s.name: s for s in workflow.steps}
+        completed: Set[str] = set()
+        failed_steps: Set[str] = set()
+        semaphore = asyncio.Semaphore(workflow.max_parallel)
+
+        async def run_step_with_semaphore(step_name: str) -> tuple:
+            async with semaphore:
+                step = step_map[step_name]
+                result = await self._execute_step_with_retry(step, context, dep_graph)
+                return step_name, result
+
+        while len(completed) < len(workflow.steps):
+            # Get all steps ready to run
+            ready = dep_graph.get_ready_nodes(completed)
+            ready = [s for s in ready if s not in failed_steps]
+
+            if not ready:
+                # Check if we're stuck (all remaining steps have failed deps)
+                remaining = set(step_map.keys()) - completed
+                if remaining and all(
+                    any(d in failed_steps for d in dep_graph.get_dependencies(s))
+                    for s in remaining
+                ):
+                    logger.warning("All remaining steps have failed dependencies")
+                    break
+                # Wait a bit for other steps to complete
+                await asyncio.sleep(0.1)
+                continue
+
+            # Run ready steps in parallel
+            tasks = [run_step_with_semaphore(name) for name in ready]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            for item in results:
+                if isinstance(item, Exception):
+                    logger.error(f"Step execution error: {item}")
+                    continue
+
+                step_name, result = item
+                task.add_result(result)
+                context["steps"][step_name] = result.output or {}
+                completed.add(step_name)
+
+                if result.success:
+                    dep_graph.mark_success(step_name, result.output)
+                else:
+                    dep_graph.mark_failed(step_name, result.error)
+                    failed_steps.add(step_name)
+
+                    # Execute step-level on_error handler
+                    step = step_map[step_name]
+                    if step.on_error:
+                        await self._execute_step_error_handler(step, result, context)
+
+                    if not step.continue_on_error:
+                        # Execute workflow-level on_error handlers
+                        await self._execute_callbacks(workflow.on_error, context)
+                        task.fail(f"Step '{step_name}' failed: {result.error}")
+                        return
+
+    def _check_failed_dependencies(
+        self,
+        step: Step,
+        dep_graph: DependencyGraph
+    ) -> List[str]:
+        """Check if any dependencies have failed."""
+        failed_deps = []
+        for dep in (step.depends_on or []):
+            node = dep_graph.get_node(dep)
+            if node and node.status not in ("success", "pending"):
+                failed_deps.append(dep)
+        return failed_deps
+
+    async def _skip_step(
+        self,
+        step: Step,
+        step_name: str,
+        task: Task,
+        context: Dict[str, Any],
+        dep_graph: DependencyGraph,
+        reason: str
+    ) -> None:
+        """Skip a step and record the reason."""
+        logger.warning(f"Skipping step '{step_name}': {reason}")
+        result = TaskResult(
+            step_name=step_name,
+            success=True,
+            output={"skipped": True, "reason": reason}
+        )
+        task.add_result(result)
+        context["steps"][step_name] = result.output or {}
+        dep_graph.mark_skipped(step_name, reason)
+
+    async def _execute_step_with_retry(
+        self,
+        step: Step,
+        context: Dict[str, Any],
+        dep_graph: DependencyGraph
+    ) -> TaskResult:
+        """Execute a step with retry logic."""
+        dep_graph.mark_running(step.name)
+        retry_count = step.get_retry_count()
+
+        result = await self._execute_step(step, context)
+
+        if not result.success and retry_count > 0:
+            for attempt in range(retry_count):
+                logger.warning(
+                    f"Retrying step '{step.name}' "
+                    f"({attempt + 1}/{retry_count})"
+                )
+                # Wait before retry
+                if step.retry_delay > 0:
+                    await asyncio.sleep(step.retry_delay)
+                result = await self._execute_step(step, context)
+                if result.success:
+                    break
+
+        if result.success:
+            dep_graph.mark_success(step.name, result.output)
+        else:
+            dep_graph.mark_failed(step.name, result.error)
+
+        return result
 
     async def _execute_step(
         self,
@@ -254,8 +374,49 @@ class Runner:
                         elif action == "notify":
                             # TODO: Implement notification
                             logger.info(f"Notification: {params}")
+                        elif action == "shell":
+                            # Execute shell command as callback
+                            from cray.plugins.builtin.shell import ShellPlugin
+                            shell = ShellPlugin()
+                            await shell.execute("exec", {"command": params}, context)
             except Exception as e:
                 logger.warning(f"Callback execution failed: {e}")
+
+    async def _execute_step_error_handler(
+        self,
+        step: Step,
+        result: TaskResult,
+        context: Dict[str, Any]
+    ) -> None:
+        """Execute step-level error handler."""
+        if not step.on_error:
+            return
+
+        error_context = {
+            **context,
+            "error": {
+                "step": step.name,
+                "message": result.error,
+                "success": False
+            }
+        }
+
+        logger.info(f"Executing error handler for step '{step.name}'")
+
+        for action, params in step.on_error.items():
+            try:
+                if action == "log":
+                    logger.error(f"Step error: {params.format(error=result.error, step=step.name)}")
+                elif action == "notify":
+                    logger.info(f"Error notification: {params}")
+                elif action == "retry":
+                    # Already handled by retry logic
+                    pass
+                elif action == "ignore":
+                    # Just log and continue
+                    logger.info(f"Ignoring error in step '{step.name}'")
+            except Exception as e:
+                logger.warning(f"Error handler execution failed: {e}")
 
     def run_sync(
         self,

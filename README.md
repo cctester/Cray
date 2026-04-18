@@ -408,19 +408,81 @@ Use `{{ }}` templates to reference previous step outputs:
 
 ```yaml
 steps:
-  - name: fetch
-    plugin: http
-    action: get
-    params:
-      url: https://api.example.com/data
+- name: fetch
+  plugin: http
+  action: get
+  params:
+    url: https://api.example.com/data
 
-  - name: process
-    plugin: file
-    action: write
-    params:
-      path: ./output.json
-      content: "{{ steps.fetch.body }}"
-    condition: "{{ steps.fetch.success }}"
+- name: process
+  plugin: file
+  action: write
+  params:
+    path: ./output.json
+    content: "{{ steps.fetch.body }}"
+  condition: "{{ steps.fetch.success }}"
+```
+
+### Parallel Execution
+
+Run independent steps concurrently for faster execution:
+
+```yaml
+name: parallel-workflow
+parallel: true
+max_parallel: 5  # Max concurrent steps
+
+steps:
+- name: fetch-users
+  plugin: http
+  action: get
+  params:
+    url: https://api.example.com/users
+
+- name: fetch-orders
+  plugin: http
+  action: get
+  params:
+    url: https://api.example.com/orders
+
+- name: combine
+  plugin: json
+  action: merge
+  params:
+    sources:
+      - "{{ steps.fetch-users.body }}"
+      - "{{ steps.fetch-orders.body }}"
+  depends_on: [fetch-users, fetch-orders]
+```
+
+### Error Handling
+
+Comprehensive error handling with retry and recovery:
+
+```yaml
+steps:
+- name: flaky-api
+  plugin: http
+  action: get
+  params:
+    url: https://unreliable-api.example.com
+  retry: 3
+  retry_delay: 2  # seconds between retries
+  continue_on_error: true  # Don't fail the workflow
+  on_error:
+    log: "API call failed: {{ error.message }}"
+    notify: "admin@example.com"
+
+# Global error handlers
+on_error:
+  - log: "Workflow encountered an error"
+  - notify: "team@example.com"
+
+on_success:
+  - log: "Workflow completed successfully"
+
+on_failure:
+  - notify: "oncall@example.com"
 ```
 
 ### Scheduled Workflows
@@ -466,6 +528,11 @@ pytest --cov=cray
 - [ ] **WebSocket Real-time Updates** - Live task status in dashboard
 - [ ] **Workflow Editor** - Visual workflow builder in dashboard
 
+### ✅ Recently Completed
+
+- [x] **Parallel Execution** - Run independent steps concurrently
+- [x] **Error Handling** - `on_error` handlers, `continue_on_error`, retry with delay
+
 ### 📋 Planned Plugins
 
 | Plugin | Description | Priority |
@@ -486,8 +553,8 @@ pytest --cov=cray
 ### 🔮 Planned Features
 
 - [ ] **Workflow Dependencies** - Chain workflows with dependencies
-- [ ] **Parallel Execution** - Run multiple steps concurrently
-- [ ] **Error Handling** - `on_error` steps, retry policies
+- [x] **Parallel Execution** - Run multiple steps concurrently
+- [x] **Error Handling** - `on_error` steps, retry policies
 - [ ] **Variables & Templates** - Jinja2 templates in workflows
 - [ ] **Secrets Management** - Secure credential storage
 - [ ] **Workflow Versioning** - Track and rollback changes
