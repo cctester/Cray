@@ -43,6 +43,11 @@ const router = createRouter({
       name: 'settings',
       component: () => import('../views/Settings.vue'),
     },
+    {
+      path: '/metrics',
+      name: 'metrics',
+      component: () => import('../views/Metrics.vue'),
+    },
   ],
 })
 

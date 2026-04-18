@@ -9,6 +9,7 @@ const navItems = [
   { path: '/workflows', icon: '📋', label: 'Workflows' },
   { path: '/runs', icon: '▶️', label: 'Runs' },
   { path: '/plugins', icon: '🔌', label: 'Plugins' },
+  { path: '/metrics', icon: '📈', label: 'Metrics' },
   { path: '/editor', icon: '✏️', label: 'Editor' },
   { path: '/settings', icon: '⚙️', label: 'Settings' },
 ]

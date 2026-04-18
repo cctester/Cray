@@ -24,6 +24,12 @@ from cray.core.versioning import (
     VersionDiff,
     get_version_manager,
 )
+from cray.core.metrics import (
+    MetricsCollector,
+    MetricsMiddleware,
+    WorkflowMetrics,
+    get_metrics_collector,
+)
 
 __all__ = [
     "Workflow",
@@ -47,4 +53,8 @@ __all__ = [
     "WorkflowVersion",
     "VersionDiff",
     "get_version_manager",
+    "MetricsCollector",
+    "MetricsMiddleware",
+    "WorkflowMetrics",
+    "get_metrics_collector",
 ]

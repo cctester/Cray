@@ -535,6 +535,7 @@ pytest --cov=cray
 - [x] **Variables & Templates** - Jinja2 templates with filters
 - [x] **Secrets Management** - Encrypted storage, env backend, template access
 - [x] **Workflow Versioning** - Save versions, rollback, diff
+- [x] **Metrics & Monitoring** - Prometheus export, real-time dashboard, system stats
 
 ### 📋 Planned Plugins
 
@@ -562,9 +563,9 @@ pytest --cov=cray
 - [x] **Variables & Templates** - Jinja2 templates in workflows
 - [x] **Secrets Management** - Secure credential storage with encryption
 - [x] **Workflow Versioning** - Track and rollback changes
+- [x] **Metrics & Monitoring** - Prometheus integration, real-time dashboard
 - [ ] **Import/Export** - Share workflows between instances
 - [ ] **Plugin Marketplace** - Discover and install community plugins
-- [ ] **Metrics & Monitoring** - Prometheus integration
 - [ ] **Cluster Mode** - Distributed workflow execution
 
 ## Contributing

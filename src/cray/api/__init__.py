@@ -11,7 +11,7 @@ from dataclasses import dataclass, asdict
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 import uvicorn
 from loguru import logger
@@ -340,8 +340,94 @@ def create_app(workflows_dir: str = "./workflows") -> FastAPI:
             runs[run_id]["completed_at"] = datetime.now().isoformat()
         
         await broadcast({"type": "run_completed", "run": runs[run_id]})
-    
-    # Serve dashboard
+
+        # Metrics API
+        from cray.core.metrics import get_metrics_collector
+
+        @app.get("/api/metrics/prometheus")
+        async def get_prometheus_metrics():
+            """Get Prometheus-compatible metrics."""
+            collector = get_metrics_collector()
+            return Response(
+                content=collector.get_prometheus_metrics(),
+                media_type="text/plain; version=0.0.4"
+            )
+
+        @app.get("/api/metrics/summary")
+        async def get_metrics_summary():
+            """Get metrics summary."""
+            collector = get_metrics_collector()
+            return collector.get_summary()
+
+        @app.get("/api/metrics/workflows")
+        async def get_workflow_metrics(
+            workflow_name: Optional[str] = None,
+            limit: int = 100
+        ):
+            """Get workflow execution metrics."""
+            collector = get_metrics_collector()
+            metrics = collector.get_workflow_metrics(workflow_name)
+            return [
+                {
+                    "workflow_name": m.workflow_name,
+                    "run_id": m.run_id,
+                    "status": m.status,
+                    "duration": m.duration,
+                    "steps_total": m.steps_total,
+                    "steps_completed": m.steps_completed,
+                    "steps_failed": m.steps_failed,
+                    "start_time": m.start_time,
+                    "end_time": m.end_time,
+                    "error": m.error
+                }
+                for m in metrics[:limit]
+            ]
+
+        @app.get("/api/metrics/realtime")
+        async def get_realtime_metrics():
+            """Get real-time system metrics."""
+            import time
+            data = {
+                "timestamp": time.time(),
+                "workflows": {},
+                "system": {}
+            }
+
+            collector = get_metrics_collector()
+            summary = collector.get_summary()
+
+            data["workflows"] = {
+                "total_runs": summary["total_runs"],
+                "successful": summary["successful"],
+                "failed": summary["failed"],
+                "running": summary["running"],
+                "success_rate": round(summary["success_rate"] * 100, 1),
+                "avg_duration": round(summary["avg_duration_seconds"], 2)
+            }
+
+            # System metrics
+            try:
+                import psutil
+                process = psutil.Process()
+                data["system"] = {
+                    "memory_mb": round(process.memory_info().rss / 1024 / 1024, 1),
+                    "cpu_percent": process.cpu_percent(),
+                    "uptime_seconds": int(summary["uptime_seconds"])
+                }
+            except ImportError:
+                data["system"] = {
+                    "uptime_seconds": int(summary["uptime_seconds"])
+                }
+
+            return data
+
+        # Health check endpoint
+        @app.get("/api/health")
+        async def health_check():
+            """Health check endpoint."""
+            return {"status": "healthy", "service": "cray-api"}
+
+        # Serve dashboard
     dashboard_path = Path(__file__).parent.parent.parent / "dashboard" / "dist"
     if dashboard_path.exists():
         app.mount("/assets", StaticFiles(directory=dashboard_path / "assets"), name="assets")
