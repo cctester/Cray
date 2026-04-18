@@ -11,6 +11,19 @@ from cray.core.dependency import (
     build_step_dependency_graph,
     build_workflow_dependency_graph,
 )
+from cray.core.secrets import (
+    SecretsManager,
+    SecretBackend,
+    get_secrets_manager,
+    get_secret,
+    set_secret,
+)
+from cray.core.versioning import (
+    WorkflowVersionManager,
+    WorkflowVersion,
+    VersionDiff,
+    get_version_manager,
+)
 
 __all__ = [
     "Workflow",
@@ -25,4 +38,13 @@ __all__ = [
     "WorkflowChain",
     "build_step_dependency_graph",
     "build_workflow_dependency_graph",
+    "SecretsManager",
+    "SecretBackend",
+    "get_secrets_manager",
+    "get_secret",
+    "set_secret",
+    "WorkflowVersionManager",
+    "WorkflowVersion",
+    "VersionDiff",
+    "get_version_manager",
 ]

@@ -524,14 +524,17 @@ pytest --cov=cray
 
 ### 🚧 In Progress
 
-- [ ] **Dashboard Frontend** - Vue 3 web UI for workflow management (partially implemented)
-- [ ] **WebSocket Real-time Updates** - Live task status in dashboard
-- [ ] **Workflow Editor** - Visual workflow builder in dashboard
+- [ ] **WebSocket Real-time Updates** - Live task status in dashboard (backend integration needed)
 
 ### ✅ Recently Completed
 
+- [x] **Dashboard Frontend** - Vue 3 web UI with workflows, runs, plugins, editor, settings pages
+- [x] **Workflow Editor** - YAML editor with validation and quick insert templates
 - [x] **Parallel Execution** - Run independent steps concurrently
 - [x] **Error Handling** - `on_error` handlers, `continue_on_error`, retry with delay
+- [x] **Variables & Templates** - Jinja2 templates with filters
+- [x] **Secrets Management** - Encrypted storage, env backend, template access
+- [x] **Workflow Versioning** - Save versions, rollback, diff
 
 ### 📋 Planned Plugins
 
@@ -555,9 +558,10 @@ pytest --cov=cray
 - [ ] **Workflow Dependencies** - Chain workflows with dependencies
 - [x] **Parallel Execution** - Run multiple steps concurrently
 - [x] **Error Handling** - `on_error` steps, retry policies
-- [ ] **Variables & Templates** - Jinja2 templates in workflows
-- [ ] **Secrets Management** - Secure credential storage
-- [ ] **Workflow Versioning** - Track and rollback changes
+- [x] **Dashboard Frontend** - Vue 3 web UI for workflow management
+- [x] **Variables & Templates** - Jinja2 templates in workflows
+- [x] **Secrets Management** - Secure credential storage with encryption
+- [x] **Workflow Versioning** - Track and rollback changes
 - [ ] **Import/Export** - Share workflows between instances
 - [ ] **Plugin Marketplace** - Discover and install community plugins
 - [ ] **Metrics & Monitoring** - Prometheus integration

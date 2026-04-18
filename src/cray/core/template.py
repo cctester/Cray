@@ -176,7 +176,13 @@ class TemplateEngine:
             # Fallback to os.environ
             import os
             return os.environ.get(key, '')
-        
+
+        # Secrets (secure credential access)
+        if expr.startswith('secrets.'):
+            key = expr[8:]  # Remove 'secrets.'
+            from cray.core.secrets import get_secret
+            return get_secret(key)
+
         # Literal values
         if expr == 'true':
             return True

@@ -157,7 +157,138 @@ def create_app(workflows_dir: str = "./workflows") -> FastAPI:
             }
             for p in registry._plugins.values()
         ]
-    
+
+    # Secrets Management API
+    from cray.core.secrets import get_secrets_manager, SecretBackend
+
+    @app.get("/api/secrets")
+    async def list_secrets():
+        """List all secrets (metadata only, no values)."""
+        sm = get_secrets_manager()
+        secrets = sm.list()
+        return [
+            {
+                "name": s.name,
+                "created_at": s.created_at,
+                "updated_at": s.updated_at,
+                "backend": s.backend.value,
+                "tags": s.tags
+            }
+            for s in secrets
+        ]
+
+    @app.post("/api/secrets/{name}")
+    async def set_secret_value(name: str, data: dict):
+        """Set a secret value."""
+        sm = get_secrets_manager()
+        value = data.get("value")
+        tags = data.get("tags", [])
+
+        if not value:
+            raise HTTPException(status_code=400, detail="value required")
+
+        sm.set(name, value, tags)
+        return {"status": "ok", "name": name}
+
+    @app.delete("/api/secrets/{name}")
+    async def delete_secret(name: str):
+        """Delete a secret."""
+        sm = get_secrets_manager()
+        if not sm.delete(name):
+            raise HTTPException(status_code=404, detail="Secret not found")
+        return {"status": "deleted", "name": name}
+
+    # Versioning API
+    from cray.core.versioning import get_version_manager
+
+    @app.get("/api/workflows/{workflow_id}/versions")
+    async def list_workflow_versions(workflow_id: str):
+        """List all versions of a workflow."""
+        vm = get_version_manager()
+        versions = vm.list_versions(workflow_id)
+        return [
+            {
+                "version_id": v.version_id,
+                "created_at": v.created_at,
+                "author": v.author,
+                "message": v.message,
+                "tags": v.tags
+            }
+            for v in versions
+        ]
+
+    @app.post("/api/workflows/{workflow_id}/versions")
+    async def save_workflow_version(workflow_id: str, data: dict):
+        """Save current workflow as a new version."""
+        vm = get_version_manager()
+
+        # Get workflow content
+        if workflow_id not in workflows:
+            raise HTTPException(status_code=404, detail="Workflow not found")
+
+        wf_data = workflows[workflow_id]
+        wf_path = Path(wf_data["file_path"])
+
+        if not wf_path.exists():
+            raise HTTPException(status_code=404, detail="Workflow file not found")
+
+        content = wf_path.read_text()
+
+        version = vm.save_version(
+            workflow_id,
+            content,
+            message=data.get("message", ""),
+            author=data.get("author", ""),
+            tags=data.get("tags", [])
+        )
+
+        return version.to_dict()
+
+    @app.post("/api/workflows/{workflow_id}/rollback/{version_id}")
+    async def rollback_workflow(workflow_id: str, version_id: str):
+        """Rollback workflow to a previous version."""
+        vm = get_version_manager()
+
+        success = vm.rollback(workflow_id, version_id)
+        if not success:
+            raise HTTPException(status_code=400, detail="Rollback failed")
+
+        # Reload workflow
+        wf_data = workflows[workflow_id]
+        wf = Workflow.from_yaml(wf_data["file_path"])
+        workflows[workflow_id] = {
+            "id": wf.name,
+            "name": wf.name,
+            "version": wf.version,
+            "description": wf.description,
+            "file_path": wf_data["file_path"],
+            "steps": [{"name": s.name, "plugin": s.plugin} for s in wf.steps],
+            "updated_at": datetime.now().isoformat(),
+        }
+
+        return {"status": "rolled_back", "version": version_id}
+
+    @app.get("/api/workflows/{workflow_id}/diff/{from_version}/{to_version}")
+    async def diff_workflow_versions(
+        workflow_id: str,
+        from_version: str,
+        to_version: str
+    ):
+        """Compare two versions of a workflow."""
+        vm = get_version_manager()
+        diff = vm.diff(workflow_id, from_version, to_version)
+
+        if not diff:
+            raise HTTPException(status_code=404, detail="Version not found")
+
+        return {
+            "from": from_version,
+            "to": to_version,
+            "additions": diff.additions,
+            "deletions": diff.deletions,
+            "changes": diff.changes[:50]  # Limit changes
+        }
+
     # WebSocket
     
     @app.websocket("/ws")
