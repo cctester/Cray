@@ -15,6 +15,13 @@ class ShellPlugin(Plugin):
     name = "shell"
     description = "Execute shell commands"
     
+    @property
+    def actions(self):
+        return {
+            "exec": {"description": "Execute a shell command", "params": [{"name": "command", "type": "string", "required": True, "description": "Shell command to execute"}]},
+            "script": {"description": "Execute a shell script", "params": [{"name": "script", "type": "string", "required": True, "description": "Shell script to execute"}]},
+        }
+    
     async def execute(
         self, 
         action: str, 

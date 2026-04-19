@@ -15,6 +15,15 @@ class AWSPlugin(Plugin):
     name = "aws"
     description = "AWS cloud services integration - S3, EC2, Lambda, and more"
     
+    @property
+    def actions(self):
+        return {
+            "s3_get": {"description": "Get S3 object", "params": [{"name": "bucket", "type": "string", "required": True, "description": "S3 bucket"}, {"name": "key", "type": "string", "required": True, "description": "Object key"}]},
+            "s3_put": {"description": "Put S3 object", "params": [{"name": "bucket", "type": "string", "required": True, "description": "S3 bucket"}, {"name": "key", "type": "string", "required": True, "description": "Object key"}, {"name": "body", "type": "string", "required": True, "description": "Content"}]},
+            "ec2_list": {"description": "List EC2 instances", "params": []},
+            "lambda_invoke": {"description": "Invoke Lambda", "params": [{"name": "function_name", "type": "string", "required": True, "description": "Function name"}, {"name": "payload", "type": "object", "required": False, "description": "Payload"}]},
+        }
+    
     def __init__(self):
         super().__init__()
         self.sessions = {}

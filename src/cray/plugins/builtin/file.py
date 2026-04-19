@@ -19,6 +19,19 @@ class FilePlugin(Plugin):
     name = "file"
     description = "File read, write, move, copy, delete operations"
     
+    @property
+    def actions(self):
+        return {
+            "read": {"description": "Read file content", "params": [{"name": "path", "type": "string", "required": True, "description": "File path"}]},
+            "write": {"description": "Write content to file", "params": [{"name": "path", "type": "string", "required": True, "description": "File path"}, {"name": "content", "type": "string", "required": True, "description": "Content to write"}]},
+            "copy": {"description": "Copy file or directory", "params": [{"name": "src", "type": "string", "required": True, "description": "Source path"}, {"name": "dst", "type": "string", "required": True, "description": "Destination path"}]},
+            "move": {"description": "Move file or directory", "params": [{"name": "src", "type": "string", "required": True, "description": "Source path"}, {"name": "dst", "type": "string", "required": True, "description": "Destination path"}]},
+            "delete": {"description": "Delete file or directory", "params": [{"name": "path", "type": "string", "required": True, "description": "Path to delete"}]},
+            "list": {"description": "List files in directory", "params": [{"name": "path", "type": "string", "required": True, "description": "Directory path"}, {"name": "pattern", "type": "string", "required": False, "description": "File pattern"}]},
+            "exists": {"description": "Check if file exists", "params": [{"name": "path", "type": "string", "required": True, "description": "Path to check"}]},
+            "mkdir": {"description": "Create directory", "params": [{"name": "path", "type": "string", "required": True, "description": "Directory path"}]},
+        }
+    
     async def execute(
         self, 
         action: str, 

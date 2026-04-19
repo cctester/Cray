@@ -16,6 +16,15 @@ class HttpPlugin(Plugin):
     name = "http"
     description = "Make HTTP requests"
     
+    @property
+    def actions(self):
+        return {
+            "get": {"description": "Make GET request", "params": [{"name": "url", "type": "string", "required": True, "description": "URL to request"}]},
+            "post": {"description": "Make POST request", "params": [{"name": "url", "type": "string", "required": True, "description": "URL to request"}, {"name": "body", "type": "string", "required": False, "description": "Request body"}]},
+            "put": {"description": "Make PUT request", "params": [{"name": "url", "type": "string", "required": True, "description": "URL to request"}, {"name": "body", "type": "string", "required": False, "description": "Request body"}]},
+            "delete": {"description": "Make DELETE request", "params": [{"name": "url", "type": "string", "required": True, "description": "URL to request"}]},
+        }
+    
     async def execute(
         self, 
         action: str, 

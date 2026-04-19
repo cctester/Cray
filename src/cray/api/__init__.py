@@ -356,14 +356,27 @@ def create_app(workflows_dir: str = None) -> FastAPI:
     async def list_plugins():
         """List available plugins."""
         manager = PluginManager()
-        return [
-            {
+        plugins = []
+        for name in manager.list_plugins():
+            plugin = manager.get_plugin(name)
+            actions = []
+            if plugin and hasattr(plugin, 'actions'):
+                for action_name, action_data in plugin.actions.items():
+                    actions.append({
+                        "name": action_name,
+                        "description": action_data.get("description", ""),
+                        "params": [
+                            {"name": p["name"], "type": p.get("type", "string"), "required": p.get("required", False), "default": p.get("default"), "description": p.get("description", "")}
+                            for p in action_data.get("params", [])
+                        ] if action_data.get("params") else []
+                    })
+            plugins.append({
                 "name": name,
-                "description": desc,
+                "description": getattr(plugin, "description", ""),
                 "version": "1.0.0",
-            }
-            for name, desc in manager.list_plugins().items()
-        ]
+                "actions": actions
+            })
+        return plugins
 
     # Secrets Management API
     from cray.core.secrets import get_secrets_manager, SecretBackend

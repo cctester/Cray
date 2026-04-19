@@ -18,10 +18,21 @@ from cray.plugins import Plugin
 class DatabasePlugin(Plugin):
     """Database operations using pydtc."""
 
+class DatabasePlugin(Plugin):
     name = "database"
     description = "Database operations for MySQL, PostgreSQL, Oracle, Hive, and more"
     version = "1.0.0"
-
+    
+    @property
+    def actions(self):
+        return {
+            "connect": {"description": "Connect to database", "params": [{"name": "db_type", "type": "string", "required": True, "description": "Database type"}, {"name": "host", "type": "string", "required": True, "description": "Database host"}]},
+            "disconnect": {"description": "Disconnect from database", "params": [{"name": "connection_name", "type": "string", "required": True, "description": "Connection name"}]},
+            "query": {"description": "Execute query", "params": [{"name": "db_type", "type": "string", "required": True, "description": "Database type"}, {"name": "sql", "type": "string", "required": True, "description": "SQL query"}]},
+            "insert": {"description": "Insert data", "params": [{"name": "table", "type": "string", "required": True, "description": "Table name"}, {"name": "data", "type": "object", "required": True, "description": "Data to insert"}]},
+            "load_temp": {"description": "Load to table", "params": [{"name": "db_type", "type": "string", "required": True, "description": "Database type"}, {"name": "table", "type": "string", "required": True, "description": "Table name"}, {"name": "data", "type": "array", "required": True, "description": "Data to load"}]},
+        }
+    
     def __init__(self):
         self._connections: Dict[str, Any] = {}
         self._pydtc = None

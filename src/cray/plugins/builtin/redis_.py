@@ -14,11 +14,17 @@ class RedisPlugin(Plugin):
 
     name = "redis"
     description = "Redis cache and queue operations"
-
-    def __init__(self):
-        super().__init__()
-        self.connections: Dict[str, aioredis.Redis] = {}
-
+    
+    @property
+    def actions(self):
+        return {
+            "connect": {"description": "Connect to Redis", "params": [{"name": "host", "type": "string", "required": True, "description": "Redis host"}, {"name": "port", "type": "number", "required": False, "description": "Redis port"}]},
+            "get": {"description": "Get value", "params": [{"name": "key", "type": "string", "required": True, "description": "Key"}]},
+            "set": {"description": "Set value", "params": [{"name": "key", "type": "string", "required": True, "description": "Key"}, {"name": "value", "type": "string", "required": True, "description": "Value"}]},
+            "delete": {"description": "Delete key", "params": [{"name": "key", "type": "string", "required": True, "description": "Key"}]},
+            "queue": {"description": "Push to queue", "params": [{"name": "queue", "type": "string", "required": True, "description": "Queue name"}, {"name": "value", "type": "string", "required": True, "description": "Value"}]},
+        }
+    
     async def execute(
         self,
         action: str,

@@ -15,6 +15,19 @@ class TextPlugin(Plugin):
     name = "text"
     description = "Text manipulation and formatting"
     
+    @property
+    def actions(self):
+        return {
+            "format": {"description": "Format text", "params": [{"name": "text", "type": "string", "required": True, "description": "Text to format"}]},
+            "replace": {"description": "Replace text", "params": [{"name": "text", "type": "string", "required": True, "description": "Text"}, {"name": "search", "type": "string", "required": True, "description": "Search pattern"}, {"name": "replace", "type": "string", "required": True, "description": "Replacement"}]},
+            "split": {"description": "Split text", "params": [{"name": "text", "type": "string", "required": True, "description": "Text to split"}, {"name": "delimiter", "type": "string", "required": False, "description": "Delimiter"}]},
+            "join": {"description": "Join text", "params": [{"name": "texts", "type": "array", "required": True, "description": "Texts to join"}, {"name": "separator", "type": "string", "required": False, "description": "Separator"}]},
+            "upper": {"description": "Convert to uppercase", "params": [{"name": "text", "type": "string", "required": True, "description": "Text"}]},
+            "lower": {"description": "Convert to lowercase", "params": [{"name": "text", "type": "string", "required": True, "description": "Text"}]},
+            "capitalize": {"description": "Capitalize text", "params": [{"name": "text", "type": "string", "required": True, "description": "Text"}]},
+            "trim": {"description": "Trim whitespace", "params": [{"name": "text", "type": "string", "required": True, "description": "Text"}]},
+        }
+    
     async def execute(
         self, 
         action: str, 

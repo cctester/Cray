@@ -16,6 +16,17 @@ class MathPlugin(Plugin):
     name = "math"
     description = "Perform mathematical calculations"
     
+    @property
+    def actions(self):
+        return {
+            "calculate": {"description": "Calculate expression", "params": [{"name": "expr", "type": "string", "required": True, "description": "Math expression"}]},
+            "sum": {"description": "Sum values", "params": [{"name": "values", "type": "array", "required": True, "description": "Array of numbers"}]},
+            "average": {"description": "Calculate average", "params": [{"name": "values", "type": "array", "required": True, "description": "Array of numbers"}]},
+            "min": {"description": "Get minimum", "params": [{"name": "values", "type": "array", "required": True, "description": "Array of numbers"}]},
+            "max": {"description": "Get maximum", "params": [{"name": "values", "type": "array", "required": True, "description": "Array of numbers"}]},
+            "round": {"description": "Round number", "params": [{"name": "value", "type": "number", "required": True, "description": "Number to round"}, {"name": "decimals", "type": "number", "required": False, "description": "Number of decimals"}]},
+        }
+    
     async def execute(
         self, 
         action: str, 

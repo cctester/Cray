@@ -15,6 +15,15 @@ class NotifyPlugin(Plugin):
     name = "notify"
     description = "Send notifications to Slack, Discord, Telegram, etc."
     
+    @property
+    def actions(self):
+        return {
+            "slack": {"description": "Send Slack notification", "params": [{"name": "webhook", "type": "string", "required": True, "description": "Webhook URL"}, {"name": "message", "type": "string", "required": True, "description": "Message"}]},
+            "discord": {"description": "Send Discord notification", "params": [{"name": "webhook", "type": "string", "required": True, "description": "Webhook URL"}, {"name": "message", "type": "string", "required": True, "description": "Message"}]},
+            "telegram": {"description": "Send Telegram notification", "params": [{"name": "bot_token", "type": "string", "required": True, "description": "Bot token"}, {"name": "chat_id", "type": "string", "required": True, "description": "Chat ID"}, {"name": "message", "type": "string", "required": True, "description": "Message"}]},
+            "webhook": {"description": "Send generic webhook", "params": [{"name": "url", "type": "string", "required": True, "description": "URL"}, {"name": "method", "type": "string", "required": False, "description": "HTTP method"}]},
+        }
+    
     async def execute(
         self, 
         action: str, 

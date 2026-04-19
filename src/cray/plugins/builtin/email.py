@@ -20,6 +20,13 @@ class EmailPlugin(Plugin):
     name = "email"
     description = "Send emails via SMTP"
     
+    @property
+    def actions(self):
+        return {
+            "send": {"description": "Send email", "params": [{"name": "smtp_host", "type": "string", "required": True, "description": "SMTP server"}, {"name": "smtp_port", "type": "number", "required": False, "description": "SMTP port"}, {"name": "from", "type": "string", "required": True, "description": "From address"}, {"name": "to", "type": "string", "required": True, "description": "To address"}, {"name": "subject", "type": "string", "required": True, "description": "Subject"}, {"name": "body", "type": "string", "required": True, "description": "Email body"}]},
+            "send_template": {"description": "Send email with template", "params": [{"name": "smtp_host", "type": "string", "required": True, "description": "SMTP server"}, {"name": "template", "type": "string", "required": True, "description": "Template name"}]},
+        }
+    
     async def execute(
         self, 
         action: str, 

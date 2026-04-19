@@ -25,7 +25,20 @@ class GitPlugin(Plugin):
     name = "git"
     description = "Git repository operations (clone, commit, push, pull, branch, tag)"
     version = "1.0.0"
-
+    
+    @property
+    def actions(self):
+        return {
+            "clone": {"description": "Clone repository", "params": [{"name": "url", "type": "string", "required": True, "description": "Repository URL"}, {"name": "path", "type": "string", "required": False, "description": "Target path"}]},
+            "init": {"description": "Initialize repository", "params": [{"name": "path", "type": "string", "required": True, "description": "Repository path"}]},
+            "status": {"description": "Get status", "params": [{"name": "path", "type": "string", "required": True, "description": "Repository path"}]},
+            "add": {"description": "Stage files", "params": [{"name": "path", "type": "string", "required": True, "description": "Repository path"}, {"name": "files", "type": "array", "required": False, "description": "Files to stage"}]},
+            "commit": {"description": "Create commit", "params": [{"name": "path", "type": "string", "required": True, "description": "Repository path"}, {"name": "message", "type": "string", "required": True, "description": "Commit message"}]},
+            "push": {"description": "Push changes", "params": [{"name": "path", "type": "string", "required": True, "description": "Repository path"}]},
+            "pull": {"description": "Pull changes", "params": [{"name": "path", "type": "string", "required": True, "description": "Repository path"}]},
+            "branch": {"description": "Manage branches", "params": [{"name": "path", "type": "string", "required": True, "description": "Repository path"}, {"name": "name", "type": "string", "required": False, "description": "Branch name"}]},
+        }
+    
     async def execute(
         self,
         action: str,

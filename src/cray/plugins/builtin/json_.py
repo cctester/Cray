@@ -16,6 +16,16 @@ class JsonPlugin(Plugin):
     name = "json"
     description = "Parse, transform, and query JSON data"
     
+    @property
+    def actions(self):
+        return {
+            "parse": {"description": "Parse JSON string", "params": [{"name": "data", "type": "string", "required": True, "description": "JSON string to parse"}]},
+            "stringify": {"description": "Convert to JSON string", "params": [{"name": "data", "type": "object", "required": True, "description": "Data to stringify"}]},
+            "query": {"description": "Query JSON data", "params": [{"name": "data", "type": "object", "required": True, "description": "JSON data"}, {"name": "query", "type": "string", "required": True, "description": "JSONPath query"}]},
+            "merge": {"description": "Merge JSON objects", "params": [{"name": "sources", "type": "array", "required": True, "description": "Array of JSON objects to merge"}]},
+            "transform": {"description": "Transform JSON data", "params": [{"name": "data", "type": "object", "required": True, "description": "Data to transform"}, {"name": "operations", "type": "array", "required": True, "description": "Transform operations"}]},
+        }
+    
     async def execute(
         self, 
         action: str, 
