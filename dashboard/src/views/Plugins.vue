@@ -51,6 +51,153 @@ function getPluginIcon(name: string) {
   }
   return icons[name] || '🔌'
 }
+
+function copyUsage(pluginName: string) {
+  const code = pluginUsage[pluginName] || ''
+  navigator.clipboard.writeText(code).then(() => {
+    alert('Copied!')
+  }).catch(() => {
+    console.error('Failed to copy')
+  })
+}
+
+const pluginUsage: Record<string, string> = {
+  shell: `steps:
+  - name: run-command
+    plugin: shell
+    action: exec
+    params:
+      command: echo "Hello"
+
+  - name: run-script
+    plugin: shell
+    action: script
+    params: |
+      #!/bin/bash
+      for i in 1 2 3; do
+        echo "Count: $i"
+      done`,
+  http: `steps:
+  - name: fetch-data
+    plugin: http
+    action: get
+    params:
+      url: https://api.example.com/data
+      timeout: 30
+
+  - name: post-data
+    plugin: http
+    action: post
+    params:
+      url: https://api.example.com/data
+      headers:
+        Content-Type: application/json
+      body: '{"key": "value"}'`,
+  file: `steps:
+  - name: read-file
+    plugin: file
+    action: read
+    params:
+      path: ./data/input.txt
+
+  - name: write-file
+    plugin: file
+    action: write
+    params:
+      path: ./data/output.txt
+      content: "Hello World"
+
+  - name: list-files
+    plugin: file
+    action: list
+    params:
+      path: ./data
+      pattern: "*.txt"`,
+  json: `steps:
+  - name: parse-json
+    plugin: json
+    action: parse
+    params:
+      data: '{"key": "value"}'
+
+  - name: query-json
+    plugin: json
+    action: query
+    params:
+      data: {{ steps.parse-json.result }}
+      query: ".key"`,
+  database: `steps:
+  - name: query-db
+    plugin: database
+    action: query
+    params:
+      db_type: postgresql
+      host: db.example.com
+      sql: "SELECT * FROM users"
+
+  - name: insert-data
+    plugin: database
+    action: insert
+    params:
+      db_type: postgresql
+      table: users
+      data:
+        name: John
+        email: john@example.com`,
+  git: `steps:
+  - name: clone-repo
+    plugin: git
+    action: clone
+    params:
+      url: https://github.com/user/repo.git
+      path: ./repo
+
+  - name: commit-changes
+    plugin: git
+    action: commit
+    params:
+      path: ./repo
+      message: "Update files"
+      files:
+        - .`,
+  notify: `steps:
+  - name: send-slack
+    plugin: notify
+    action: slack
+    params:
+      webhook: {{ secrets.SLACK_WEBHOOK }}
+      message: "Deployment completed!"
+
+  - name: send-discord
+    plugin: notify
+    action: discord
+    params:
+      webhook: {{ secrets.DISCORD_WEBHOOK }}
+      message: "Build succeeded!"`,
+  email: `steps:
+  - name: send-email
+    plugin: email
+    action: send
+    params:
+      smtp_host: smtp.example.com
+      smtp_port: 587
+      from: noreply@example.com
+      to: user@example.com
+      subject: Alert
+      body: "Something happened!"`,
+  math: `steps:
+  - name: calculate
+    plugin: math
+    action: calculate
+    params:
+      expr: "(10 + 5) * 2"
+
+  - name: sum-values
+    plugin: math
+    action: sum
+    params:
+      values: [1, 2, 3, 4, 5]`,
+}
 </script>
 
 <template>
@@ -106,6 +253,14 @@ function getPluginIcon(name: string) {
             <p>{{ selectedPluginData.description }}</p>
           </div>
           <span class="detail-version">v{{ selectedPluginData.version }}</span>
+        </div>
+
+        <div class="usage-section">
+          <h3>Usage Example</h3>
+          <pre class="usage-code">{{ pluginUsage[selectedPluginData.name] || '# Add to your workflow\nsteps:\n  - name: my-step\n    plugin: ' + selectedPluginData.name + '\n    action: ...\n    params:\n      ...' }}</pre>
+          <button class="btn btn-secondary btn-sm" @click="copyUsage(selectedPluginData.name)">
+            Copy
+          </button>
         </div>
 
         <div class="actions-section">
@@ -410,6 +565,37 @@ function getPluginIcon(name: string) {
 .empty-detail p {
   color: var(--text-muted);
   margin: 0;
+}
+
+.usage-section {
+  margin-bottom: 24px;
+  padding: 16px;
+  background: var(--bg-secondary);
+  border-radius: 10px;
+}
+
+.usage-section h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 12px 0;
+}
+
+.usage-code {
+  font-family: monospace;
+  font-size: 12px;
+  background: var(--bg-primary);
+  padding: 12px;
+  border-radius: 6px;
+  overflow-x: auto;
+  white-space: pre;
+  color: var(--text-secondary);
+  margin: 0 0 12px 0;
+}
+
+.btn-sm {
+  padding: 6px 12px;
+  font-size: 12px;
 }
 
 @media (max-width: 900px) {

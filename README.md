@@ -89,11 +89,18 @@ Start the server:
 cray serve --host 0.0.0.0 --port 8000
 ```
 
-This starts both the REST API and the web dashboard.
+This starts the REST API.
 
-### Dashboard
+### Dashboard (CSR)
 
-Open http://localhost:8000/ in your browser to access the web dashboard. It provides:
+Run the dashboard as a standalone client-side app:
+
+```bash
+cd dashboard
+npm run dev
+```
+
+Open http://localhost:3000 in your browser. The dashboard proxies API requests to the backend at http://localhost:8000.
 
 - Workflow management UI
 - Real-time run monitoring

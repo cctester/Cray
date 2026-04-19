@@ -24,7 +24,7 @@ from cray.plugins import PluginManager
 # Models
 class WorkflowCreate(BaseModel):
     name: str
-    content: Optional[str] = ""
+    content: str = ""
 
 
 class WorkflowRunRequest(BaseModel):
@@ -52,7 +52,7 @@ runs: Dict[str, Dict] = {}
 websocket_clients: List[WebSocket] = []
 
 
-def create_app(workflows_dir: str = "./workflows") -> FastAPI:
+def create_app(workflows_dir: str = None) -> FastAPI:
     """Create FastAPI application."""
     app = FastAPI(title="Cray API", version="1.0.0")
 
@@ -114,6 +114,10 @@ def create_app(workflows_dir: str = "./workflows") -> FastAPI:
         ]
         return Response(content="\n".join(lines), media_type="text/plain")
 
+    # Default to project root workflows directory
+    if workflows_dir is None:
+        workflows_dir = str((Path(__file__).parent / ".." / ".." / ".." / "workflows").resolve())
+    
     # Load workflows
     workflows_path = Path(workflows_dir)
     workflows_path.mkdir(parents=True, exist_ok=True)
@@ -127,7 +131,7 @@ def create_app(workflows_dir: str = "./workflows") -> FastAPI:
                     "version": wf.version,
                     "description": wf.description,
                     "file_path": str(file),
-                    "steps": [{"name": s.name, "plugin": s.plugin} for s in wf.steps],
+"steps": [{"name": s.name, "plugin": s.plugin, "action": s.action, "params": s.params} for s in wf.steps],
                     "created_at": datetime.now().isoformat(),
                     "updated_at": datetime.now().isoformat(),
                 }
@@ -147,22 +151,50 @@ def create_app(workflows_dir: str = "./workflows") -> FastAPI:
         if request.name in workflows:
             raise HTTPException(status_code=400, detail="Workflow already exists")
 
-        content = request.content or f"name: {request.name}\ndescription: New workflow\nsteps: []\n"
+        # Use default template only if content is empty
+        if not request.content:
+            content = f"name: {request.name}\ndescription: New workflow\nsteps:\n  - name: step1\n    plugin: shell\n    action: exec\n    params:\n      command: echo 'Hello'\n"
+        else:
+            content = request.content
+
+        # Validate YAML content
+        import yaml
+        try:
+            data = yaml.safe_load(content)
+        except yaml.YAMLError as e:
+            raise HTTPException(status_code=400, detail=f"Invalid YAML: {str(e)}")
+
+        if not isinstance(data, dict):
+            raise HTTPException(status_code=400, detail="YAML must be a dictionary")
+
+        yaml_name = data.get("name")
+        if yaml_name != request.name:
+            raise HTTPException(status_code=400, detail=f"Name in YAML ('{yaml_name}') does not match request name ('{request.name}')")
+
+        # Validate workflow structure
+        errors = []
+        if "steps" not in data:
+            errors.append("Missing 'steps' field")
+        if not data.get("steps"):
+            errors.append("Workflow must have at least one step")
+        if errors:
+            raise HTTPException(status_code=400, detail="; ".join(errors))
+
         file_path = workflows_path / f"{request.name}.yaml"
         file_path.write_text(content)
 
         workflows[request.name] = {
             "id": request.name,
-            "name": request.name,
-            "version": "1.0.0",
-            "description": "",
+            "name": data.get("name", request.name),
+            "version": data.get("version", "1.0.0"),
+            "description": data.get("description", ""),
             "file_path": str(file_path),
-            "steps": [],
+            "steps": data.get("steps", []),
             "created_at": datetime.now().isoformat(),
             "updated_at": datetime.now().isoformat(),
         }
 
-        return {"created": request.name, "file": str(file_path)}
+        return {"id": request.name, "name": request.name, "file": str(file_path)}
 
     @app.get("/api/workflows/{workflow_id}")
     async def get_workflow(workflow_id: str):
@@ -172,16 +204,51 @@ def create_app(workflows_dir: str = "./workflows") -> FastAPI:
         wf = workflows[workflow_id].copy()
         file_path = wf.get("file_path") or str(workflows_path / f"{workflow_id}.yaml")
         if Path(file_path).exists():
-            wf_obj = Workflow.from_yaml(file_path)
-            wf["content"] = Path(file_path).read_text()
-            wf["steps"] = [{"name": s.name, "plugin": s.plugin, "action": s.action, "params": s.params} for s in wf_obj.steps]
+            try:
+                wf_obj = Workflow.from_yaml(file_path)
+                wf["steps"] = [{"name": s.name, "plugin": s.plugin, "action": s.action, "params": s.params} for s in wf_obj.steps]
+            except Exception as e:
+                logger.error(f"Failed to parse workflow {workflow_id}: {e}")
+                wf["steps"] = wf.get("steps", [])
         return wf
 
     @app.put("/api/workflows/{workflow_id}")
     async def update_workflow(workflow_id: str, request: WorkflowCreate):
         """Update a workflow."""
+        if workflow_id not in workflows:
+            raise HTTPException(status_code=404, detail="Workflow not found")
+
         file_path = workflows_path / f"{workflow_id}.yaml"
-        content = request.content or f"name: {workflow_id}\ndescription: Updated\nsteps: []\n"
+
+        # Use default template only if content is empty
+        if not request.content:
+            content = f"name: {workflow_id}\ndescription: Updated\nsteps:\n  - name: step1\n    plugin: shell\n    action: exec\n    params:\n      command: echo 'Updated'\n"
+        else:
+            content = request.content
+
+        # Validate YAML content
+        import yaml
+        try:
+            data = yaml.safe_load(content)
+        except yaml.YAMLError as e:
+            raise HTTPException(status_code=400, detail=f"Invalid YAML: {str(e)}")
+
+        if not isinstance(data, dict):
+            raise HTTPException(status_code=400, detail="YAML must be a dictionary")
+
+        yaml_name = data.get("name")
+        if yaml_name != workflow_id:
+            raise HTTPException(status_code=400, detail=f"Name in YAML ('{yaml_name}') does not match workflow_id ('{workflow_id}')")
+
+        # Validate workflow structure
+        errors = []
+        if "steps" not in data:
+            errors.append("Missing 'steps' field")
+        if not data.get("steps"):
+            errors.append("Workflow must have at least one step")
+        if errors:
+            raise HTTPException(status_code=400, detail="; ".join(errors))
+
         file_path.write_text(content)
 
         # Reload workflow from file
@@ -197,7 +264,7 @@ def create_app(workflows_dir: str = "./workflows") -> FastAPI:
             "updated_at": datetime.now().isoformat(),
         }
 
-        return {"updated": workflow_id}
+        return {"id": workflow_id, "name": workflow_id}
 
     @app.post("/api/workflows/{workflow_id}/run")
     async def run_workflow(workflow_id: str, request: WorkflowRunRequest):
@@ -510,28 +577,10 @@ def create_app(workflows_dir: str = "./workflows") -> FastAPI:
         """Health check endpoint."""
         return {"status": "healthy", "service": "cray-api"}
 
-    # Serve dashboard
-    dashboard_path = Path(__file__).parent.parent.parent.parent / "dashboard" / "dist"
-    if dashboard_path.exists():
-        app.mount("/assets", StaticFiles(directory=dashboard_path / "assets"), name="assets")
-
-        @app.get("/")
-        async def serve_root():
-            """Serve dashboard root."""
-            return FileResponse(dashboard_path / "index.html")
-
-        @app.get("/{path:path}")
-        async def serve_dashboard(path: str):
-            """Serve dashboard for all non-API routes."""
-            excluded = ["api", "docs", "redoc", "openapi", "assets", "ws"]
-            if any(path.startswith(p) for p in excluded):
-                raise HTTPException(status_code=404, detail="Not found")
-            return FileResponse(dashboard_path / "index.html")
-
     return app
 
 
-def run_server(host: str = "0.0.0.0", port: int = 8000, workflows_dir: str = "./workflows"):
+def run_server(host: str = "0.0.0.0", port: int = 8000, workflows_dir: str = None):
     """Run the API server."""
     app = create_app(workflows_dir)
     uvicorn.run(app, host=host, port=port, log_level="info")

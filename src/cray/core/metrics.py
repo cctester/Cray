@@ -277,11 +277,29 @@ class MetricsCollector:
         """
         with self._lock:
             workflows = list(self._workflows.values())
+            counters = dict(self._counters)
         
-        total_runs = len(workflows)
-        successful = sum(1 for w in workflows if w.status == "success")
-        failed = sum(1 for w in workflows if w.status == "failed")
-        running = sum(1 for w in workflows if w.status == "running")
+        # Count from counters
+        total_runs = 0
+        successful = 0
+        failed = 0
+        running = 0
+        for key, value in counters.items():
+            if "cray_workflow_total" in key:
+                total_runs += value
+                if 'status="success"' in key:
+                    successful += value
+                elif 'status="failed"' in key:
+                    failed += value
+                elif 'status="running"' in key:
+                    running += value
+        
+        # Fallback to workflow dict if no counters
+        if total_runs == 0:
+            total_runs = len(workflows)
+            successful = sum(1 for w in workflows if w.status == "success")
+            failed = sum(1 for w in workflows if w.status == "failed")
+            running = sum(1 for w in workflows if w.status == "running")
         
         durations = [w.duration for w in workflows if w.end_time]
         avg_duration = sum(durations) / len(durations) if durations else 0

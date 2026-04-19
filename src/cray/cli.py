@@ -296,7 +296,7 @@ def schedule_remove(job_id: str):
 @main.command()
 @click.option("--host", default="127.0.0.1", help="Host to bind")
 @click.option("--port", default=8000, help="Port to bind")
-@click.option("--workflow-dir", default="./workflows", help="Workflow directory")
+@click.option("--workflow-dir", default="workflows", help="Workflow directory")
 def serve(host: str, port: int, workflow_dir: str):
     """Start the web API server."""
     from cray.api import create_app

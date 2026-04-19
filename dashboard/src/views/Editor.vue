@@ -8,8 +8,8 @@ const route = useRoute()
 const router = useRouter()
 const store = useWorkflowStore()
 
-const yamlContent = ref(`name: my-workflow
-description: A new workflow
+const yamlContent = ref(`name: new-workflow
+description: 
 version: "1.0"
 
 steps:
@@ -17,7 +17,7 @@ steps:
     plugin: shell
     action: exec
     params:
-      command: echo "Hello, World!"
+      command: echo "Hello"
 `)
 
 const parsedWorkflow = computed(() => {
@@ -70,7 +70,8 @@ onMounted(async () => {
     try {
       const response = await fetch(`/api/workflows/${workflowId}`)
       const workflow = await response.json()
-      yamlContent.value = YAML.stringify(workflow)
+      // Use content field if available, otherwise stringify the API response
+      yamlContent.value = workflow.content || YAML.stringify(workflow)
     } catch (e) {
       console.error('Failed to load workflow:', e)
     }
@@ -120,6 +121,17 @@ async function save() {
   saving.value = true
   try {
     const workflow = parsedWorkflow.value
+    const workflowId = workflow.name || route.query.id
+    if (!workflowId) {
+      console.error('Missing workflow name')
+      return
+    }
+    
+    const payload = {
+      name: workflowId,
+      content: yamlContent.value
+    }
+    
     const method = route.query.id ? 'PUT' : 'POST'
     const url = route.query.id 
       ? `/api/workflows/${route.query.id}`
@@ -128,12 +140,12 @@ async function save() {
     const response = await fetch(url, {
       method,
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(workflow)
+      body: JSON.stringify(payload)
     })
     
     if (response.ok) {
       const saved = await response.json()
-      router.push(`/workflows/${saved.id}`)
+      router.push(`/workflows/${workflowId}`)
     }
   } catch (e) {
     console.error('Failed to save:', e)

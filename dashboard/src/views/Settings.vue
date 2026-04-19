@@ -24,6 +24,9 @@ async function saveSettings() {
   saving.value = true
   try {
     localStorage.setItem('cray-settings', JSON.stringify(settings.value))
+    const theme = settings.value.theme || 'dark'
+    document.documentElement.setAttribute('data-theme', theme)
+    console.log('Theme set to:', theme)
     await new Promise(r => setTimeout(r, 500))
     saved.value = true
     setTimeout(() => { saved.value = false }, 2000)
@@ -41,6 +44,19 @@ function resetSettings() {
     showNotifications: true,
     logLevel: 'info',
   }
+  onThemeChange()
+  saveSettings()
+}
+
+function onThemeChange() {
+  const theme = settings.value.theme
+  if (theme === 'auto') {
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+    document.documentElement.setAttribute('data-theme', prefersDark ? 'dark' : 'light')
+  } else {
+    document.documentElement.setAttribute('data-theme', theme)
+  }
+  console.log('Theme changed to:', document.documentElement.getAttribute('data-theme'))
 }
 </script>
 
@@ -76,7 +92,7 @@ function resetSettings() {
             Theme
             <span class="setting-desc">Color scheme</span>
           </label>
-          <select v-model="settings.theme" class="setting-select">
+          <select v-model="settings.theme" class="setting-select" @change="onThemeChange">
             <option value="dark">Dark</option>
             <option value="light">Light</option>
             <option value="auto">Auto</option>

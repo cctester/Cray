@@ -105,7 +105,7 @@ class Workflow(BaseModel):
         return cls(
             name=data.get("name", path.stem),
             version=data.get("version", "1.0"),
-            description=data.get("description", ""),
+            description=data.get("description") or "",
             variables=data.get("variables", {}),
             dependencies=data.get("dependencies", []),
             triggers=triggers,
