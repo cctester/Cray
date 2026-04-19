@@ -157,13 +157,124 @@ class Workflow(BaseModel):
     def validate_steps(self) -> List[str]:
         """Validate workflow steps, return list of errors."""
         errors = []
-        
+
         if not self.steps:
             errors.append("Workflow has no steps defined")
-        
+
         step_names = [s.name for s in self.steps]
         duplicates = [n for n in step_names if step_names.count(n) > 1]
         if duplicates:
             errors.append(f"Duplicate step names: {set(duplicates)}")
-        
+
         return errors
+
+    @classmethod
+    def from_yaml_string(cls, yaml_content: str) -> "Workflow":
+        """Load workflow from YAML string."""
+        data = yaml.safe_load(yaml_content)
+
+        # Parse triggers
+        triggers = []
+        for trigger_data in data.get("triggers", []):
+            if isinstance(trigger_data, dict):
+                if "schedule" in trigger_data:
+                    triggers.append(Trigger.schedule(trigger_data["schedule"]))
+                elif trigger_data.get("manual"):
+                    triggers.append(Trigger.manual())
+            elif isinstance(trigger_data, str):
+                if trigger_data == "manual":
+                    triggers.append(Trigger.manual())
+
+        # Parse steps
+        steps = [Step(**step) for step in data.get("steps", [])]
+
+        return cls(
+            name=data.get("name", "unnamed"),
+            version=data.get("version", "1.0"),
+            description=data.get("description", ""),
+            variables=data.get("variables", {}),
+            dependencies=data.get("dependencies", []),
+            triggers=triggers,
+            steps=steps,
+            on_success=data.get("on_success", []),
+            on_failure=data.get("on_failure", []),
+            on_error=data.get("on_error", []),
+            parallel=data.get("parallel", False),
+            max_parallel=data.get("max_parallel", 10),
+        )
+
+
+class WorkflowManager:
+    """Manages workflow storage and retrieval."""
+
+    def __init__(self, workflows_dir: str = "workflows"):
+        self.workflows_dir = Path(workflows_dir)
+        self.workflows_dir.mkdir(parents=True, exist_ok=True)
+        self._workflows: Dict[str, Dict[str, Any]] = {}
+        self._load_workflows()
+
+    def _load_workflows(self):
+        """Load all workflows from the workflows directory."""
+        for yaml_file in self.workflows_dir.glob("*.yaml"):
+            try:
+                workflow = Workflow.from_yaml(yaml_file)
+                self._workflows[workflow.name] = {
+                    "id": workflow.name,
+                    "name": workflow.name,
+                    "version": workflow.version,
+                    "description": workflow.description,
+                    "file_path": str(yaml_file),
+                    "steps": [{"name": s.name, "plugin": s.plugin} for s in workflow.steps],
+                }
+            except Exception as e:
+                logger.warning(f"Failed to load workflow {yaml_file}: {e}")
+
+    def list_workflows(self) -> List[Dict[str, Any]]:
+        """List all workflows."""
+        return list(self._workflows.values())
+
+    def get_workflow(self, workflow_id: str) -> Optional[Dict[str, Any]]:
+        """Get a specific workflow."""
+        return self._workflows.get(workflow_id)
+
+    def save_workflow(self, workflow_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Save a workflow."""
+        workflow_id = workflow_data.get("id") or workflow_data.get("name")
+        workflow_path = self.workflows_dir / f"{workflow_id}.yaml"
+
+        # Build workflow object
+        workflow_dict = {
+            "name": workflow_id,
+            "version": workflow_data.get("version", "1.0"),
+            "description": workflow_data.get("description", ""),
+            "steps": workflow_data.get("steps", []),
+        }
+
+        if workflow_data.get("variables"):
+            workflow_dict["variables"] = workflow_data["variables"]
+        if workflow_data.get("triggers"):
+            workflow_dict["triggers"] = workflow_data["triggers"]
+
+        # Save to file
+        with open(workflow_path, "w", encoding="utf-8") as f:
+            yaml.dump(workflow_dict, f, default_flow_style=False, allow_unicode=True)
+
+        # Update cache
+        self._workflows[workflow_id] = {
+            "id": workflow_id,
+            "name": workflow_id,
+            "version": workflow_dict["version"],
+            "description": workflow_dict["description"],
+            "file_path": str(workflow_path),
+            "steps": workflow_data.get("steps", []),
+        }
+
+        return self._workflows[workflow_id]
+
+    def delete_workflow(self, workflow_id: str):
+        """Delete a workflow."""
+        if workflow_id in self._workflows:
+            workflow_path = Path(self._workflows[workflow_id]["file_path"])
+            if workflow_path.exists():
+                workflow_path.unlink()
+            del self._workflows[workflow_id]

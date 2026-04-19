@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cray WebSocket Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 { margin-top: 0; }
+        .status {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+        }
+        .status.connected { background: #dcfce7; color: #166534; }
+        .status.disconnected { background: #fee2e2; color: #991b1b; }
+        .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: currentColor;
+        }
+        #messages {
+            height: 400px;
+            overflow-y: auto;
+            border: 1px solid #e5e7eb;
+            border-radius: 8px;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 12px;
+            background: #1e1e1e;
+            color: #d4d4d4;
+        }
+        .msg { margin: 4px 0; }
+        .msg.event { color: #4fc3f7; }
+        .msg.error { color: #f44336; }
+        .msg.info { color: #81c784; }
+        button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-right: 10px;
+        }
+        .btn-primary { background: #3b82f6; color: white; }
+        .btn-secondary { background: #6b7280; color: white; }
+        button:hover { opacity: 0.9; }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>🦀 Cray WebSocket Test</h1>
+        <div id="status" class="status disconnected">
+            <span class="dot"></span>
+            <span id="status-text">Disconnected</span>
+        </div>
+    </div>
+
+    <div class="card">
+        <button id="connect-btn" class="btn-primary" onclick="connect()">Connect</button>
+        <button id="disconnect-btn" class="btn-secondary" onclick="disconnect()" disabled>Disconnect</button>
+        <button class="btn-secondary" onclick="clearMessages()">Clear</button>
+    </div>
+
+    <div class="card">
+        <h3>Messages</h3>
+        <div id="messages"></div>
+    </div>
+
+    <script>
+        let ws = null;
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 5;
+
+        function getWebSocketUrl() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const host = window.location.host;
+            return `${protocol}//${host}/ws`;
+        }
+
+        function updateStatus(connected) {
+            const status = document.getElementById('status');
+            const statusText = document.getElementById('status-text');
+            const connectBtn = document.getElementById('connect-btn');
+            const disconnectBtn = document.getElementById('disconnect-btn');
+
+            if (connected) {
+                status.className = 'status connected';
+                statusText.textContent = 'Connected';
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+            } else {
+                status.className = 'status disconnected';
+                statusText.textContent = 'Disconnected';
+                connectBtn.disabled = false;
+                disconnectBtn.disabled = true;
+            }
+        }
+
+        function addMessage(text, type = 'info') {
+            const messages = document.getElementById('messages');
+            const msg = document.createElement('div');
+            msg.className = `msg ${type}`;
+            const time = new Date().toLocaleTimeString();
+            msg.textContent = `[${time}] ${text}`;
+            messages.appendChild(msg);
+            messages.scrollTop = messages.scrollHeight;
+        }
+
+        function connect() {
+            const url = getWebSocketUrl();
+            addMessage(`Connecting to ${url}...`);
+
+            ws = new WebSocket(url);
+
+            ws.onopen = () => {
+                addMessage('WebSocket connected!', 'info');
+                updateStatus(true);
+                reconnectAttempts = 0;
+                startPing();
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    addMessage(`Event: ${data.type}`, 'event');
+                    addMessage(JSON.stringify(data, null, 2), 'info');
+                } catch (e) {
+                    addMessage(`Message: ${event.data}`, 'info');
+                }
+            };
+
+            ws.onclose = (event) => {
+                addMessage(`Connection closed: ${event.code} ${event.reason}`, 'error');
+                updateStatus(false);
+                stopPing();
+                attemptReconnect();
+            };
+
+            ws.onerror = (error) => {
+                addMessage('WebSocket error!', 'error');
+            };
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
+            reconnectAttempts = maxReconnectAttempts; // Prevent auto-reconnect
+        }
+
+        let pingInterval = null;
+
+        function startPing() {
+            pingInterval = setInterval(() => {
+                if (ws && ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({ type: 'ping' }));
+                    addMessage('Sent ping', 'info');
+                }
+            }, 30000);
+        }
+
+        function stopPing() {
+            if (pingInterval) {
+                clearInterval(pingInterval);
+                pingInterval = null;
+            }
+        }
+
+        function attemptReconnect() {
+            if (reconnectAttempts >= maxReconnectAttempts) {
+                addMessage('Max reconnect attempts reached', 'error');
+                return;
+            }
+
+            reconnectAttempts++;
+            const delay = 1000 * Math.pow(2, reconnectAttempts - 1);
+            addMessage(`Reconnecting in ${delay}ms (attempt ${reconnectAttempts})...`);
+
+            setTimeout(() => {
+                if (!ws || ws.readyState === WebSocket.CLOSED) {
+                    connect();
+                }
+            }, delay);
+        }
+
+        function clearMessages() {
+            document.getElementById('messages').innerHTML = '';
+        }
+
+        // Auto-connect on page load
+        // connect();
+    </script>
+</body>
+</html>

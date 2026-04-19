@@ -1,314 +1,401 @@
-<script setup lang="ts">
-import { onMounted, computed } from 'vue'
-import { useWorkflowStore } from '../stores/workflow'
-import StatsCard from '../components/StatsCard.vue'
-import RunsList from '../components/RunsList.vue'
-
-const store = useWorkflowStore()
-
-onMounted(async () => {
-  await Promise.all([
-    store.fetchWorkflows(),
-    store.fetchRuns(),
-    store.fetchPlugins(),
-  ])
-  store.connectWebSocket()
-})
-
-const stats = computed(() => ({
-  workflows: store.workflows.length,
-  runs: store.runs.length,
-  running: store.runningWorkflows.length,
-  successRate: store.successRate,
-}))
-
-const recentRuns = computed(() => store.recentRuns.slice(0, 5))
-</script>
-
 <template>
   <div class="dashboard">
-    <div class="dashboard-header">
-      <h1>Dashboard</h1>
-      <div class="header-actions">
-        <router-link to="/editor" class="btn btn-primary">
-          + New Workflow
-        </router-link>
+    <header class="dashboard-header">
+      <h1>Cray Dashboard</h1>
+      <div class="connection-status" :class="{ connected: wsConnected }">
+        <span class="status-dot"></span>
+        {{ wsConnected ? 'Connected' : 'Disconnected' }}
       </div>
-    </div>
+    </header>
 
+    <!-- Stats Cards -->
     <div class="stats-grid">
-      <StatsCard
-        title="Workflows"
-        :value="stats.workflows"
-        icon="📋"
-        color="#3b82f6"
-      />
-      <StatsCard
-        title="Total Runs"
-        :value="stats.runs"
-        icon="▶️"
-        color="#8b5cf6"
-      />
-      <StatsCard
-        title="Running"
-        :value="stats.running"
-        icon="🔄"
-        color="#f59e0b"
-      />
-      <StatsCard
-        title="Success Rate"
-        :value="`${stats.successRate}%`"
-        icon="✅"
-        color="#10b981"
-      />
-    </div>
-
-    <div class="dashboard-grid">
-      <div class="panel recent-runs">
-        <div class="panel-header">
-          <h2>Recent Runs</h2>
-          <router-link to="/runs" class="view-all">View All →</router-link>
-        </div>
-        <RunsList :runs="recentRuns" />
-      </div>
-
-      <div class="panel quick-actions">
-        <div class="panel-header">
-          <h2>Quick Actions</h2>
-        </div>
-        <div class="actions-grid">
-          <router-link to="/workflows" class="action-card">
-            <span class="action-icon">📋</span>
-            <span class="action-label">Browse Workflows</span>
-          </router-link>
-          <router-link to="/editor" class="action-card">
-            <span class="action-icon">✏️</span>
-            <span class="action-label">Create Workflow</span>
-          </router-link>
-          <router-link to="/plugins" class="action-card">
-            <span class="action-icon">🔌</span>
-            <span class="action-label">View Plugins</span>
-          </router-link>
-          <router-link to="/runs" class="action-card">
-            <span class="action-icon">📊</span>
-            <span class="action-label">Run History</span>
-          </router-link>
+      <div class="stat-card">
+        <div class="stat-icon">📋</div>
+        <div class="stat-content">
+          <div class="stat-value">{{ workflowCount }}</div>
+          <div class="stat-label">Workflows</div>
         </div>
       </div>
 
-      <div class="panel workflows-panel">
-        <div class="panel-header">
-          <h2>Workflows</h2>
-          <router-link to="/workflows" class="view-all">View All →</router-link>
+      <div class="stat-card">
+        <div class="stat-icon">▶️</div>
+        <div class="stat-content">
+          <div class="stat-value">{{ runningCount }}</div>
+          <div class="stat-label">Running</div>
         </div>
-        <div class="workflows-list">
-          <div 
-            v-for="workflow in store.workflows.slice(0, 5)" 
-            :key="workflow.id"
-            class="workflow-item"
-          >
-            <div class="workflow-info">
-              <h3 class="workflow-name">{{ workflow.name }}</h3>
-              <p class="workflow-desc">{{ workflow.description || 'No description' }}</p>
-            </div>
-            <div class="workflow-meta">
-              <span class="step-count">{{ workflow.steps?.length || 0 }} steps</span>
-            </div>
-          </div>
-          <div v-if="!store.workflows.length" class="empty">
-            No workflows yet
-          </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-icon">✅</div>
+        <div class="stat-content">
+          <div class="stat-value">{{ successRate }}%</div>
+          <div class="stat-label">Success Rate</div>
+        </div>
+      </div>
+
+      <div class="stat-card">
+        <div class="stat-icon">📊</div>
+        <div class="stat-content">
+          <div class="stat-value">{{ runs.length }}</div>
+          <div class="stat-label">Total Runs</div>
         </div>
       </div>
     </div>
+
+    <!-- Recent Runs -->
+    <section class="recent-runs">
+      <h2>Recent Runs</h2>
+      <div class="runs-list" v-if="runs.length > 0">
+        <div
+          v-for="run in recentRuns"
+          :key="run.id"
+          class="run-item"
+          :class="run.status"
+        >
+          <div class="run-info">
+            <span class="run-workflow">{{ run.workflow_id }}</span>
+            <span class="run-id">#{{ run.id }}</span>
+          </div>
+          <div class="run-status">
+            <span class="status-badge" :class="run.status">
+              {{ run.status }}
+            </span>
+          </div>
+          <div class="run-time">
+            {{ formatTime(run.started_at) }}
+          </div>
+          <div class="run-steps" v-if="run.steps.length > 0">
+            {{ run.steps.filter(s => s.success).length }}/{{ run.steps.length }} steps
+          </div>
+        </div>
+      </div>
+      <div class="empty-state" v-else>
+        No runs yet. Start a workflow to see results here.
+      </div>
+    </section>
+
+    <!-- Workflows -->
+    <section class="workflows">
+      <h2>Workflows</h2>
+      <div class="workflows-grid" v-if="workflows.length > 0">
+        <div
+          v-for="workflow in workflows"
+          :key="workflow.id"
+          class="workflow-card"
+        >
+          <h3>{{ workflow.name }}</h3>
+          <p class="workflow-desc">{{ workflow.description || 'No description' }}</p>
+          <div class="workflow-meta">
+            <span>v{{ workflow.version }}</span>
+            <span>{{ workflow.steps?.length || 0 }} steps</span>
+          </div>
+          <div class="workflow-actions">
+            <button @click="runWorkflowHandler(workflow.id)" class="btn-run">
+              Run
+            </button>
+            <router-link :to="`/editor/${workflow.id}`" class="btn-edit">
+              Edit
+            </router-link>
+          </div>
+        </div>
+      </div>
+      <div class="empty-state" v-else>
+        No workflows. Create one in the Editor.
+      </div>
+    </section>
   </div>
 </template>
 
+<script setup lang="ts">
+import { computed, onMounted, onUnmounted } from 'vue'
+import { useWorkflowStore } from '@/stores/workflow'
+import { wsService } from '@/services/websocket'
+
+const store = useWorkflowStore()
+
+// Computed
+const workflows = computed(() => store.workflows)
+const runs = computed(() => store.runs)
+const workflowCount = computed(() => store.workflowCount)
+const runningCount = computed(() => store.runningCount)
+const successRate = computed(() => store.successRate)
+const wsConnected = computed(() => store.wsConnected)
+
+const recentRuns = computed(() => {
+  return [...store.runs]
+    .sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime())
+    .slice(0, 10)
+})
+
+// Methods
+function formatTime(isoString: string): string {
+  const date = new Date(isoString)
+  return date.toLocaleTimeString()
+}
+
+async function runWorkflowHandler(workflowId: string) {
+  try {
+    await store.runWorkflow(workflowId)
+  } catch (e) {
+    console.error('Failed to run workflow:', e)
+  }
+}
+
+// Lifecycle
+onMounted(async () => {
+  // Initialize WebSocket
+  if (!wsService.isConnected()) {
+    try {
+      await wsService.connect()
+      store.initWebSocket()
+    } catch (e) {
+      console.error('WebSocket connection failed:', e)
+    }
+  }
+
+  // Fetch initial data
+  await Promise.all([
+    store.fetchWorkflows(),
+    store.fetchRuns()
+  ])
+})
+
+onUnmounted(() => {
+  // Don't disconnect WebSocket - keep it alive for other components
+})
+</script>
+
 <style scoped>
 .dashboard {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
+  padding: 2rem;
+  max-width: 1200px;
+  margin: 0 auto;
 }
 
 .dashboard-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  margin-bottom: 2rem;
 }
 
 .dashboard-header h1 {
-  font-size: 24px;
+  font-size: 1.75rem;
   font-weight: 600;
-  color: var(--text-primary);
   margin: 0;
 }
 
-.btn {
-  padding: 10px 20px;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.2s;
-  text-decoration: none;
-  border: none;
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  background: #fee2e2;
+  border-radius: 9999px;
+  font-size: 0.875rem;
+  color: #991b1b;
 }
 
-.btn-primary {
-  background: var(--primary-color);
-  color: white;
+.connection-status.connected {
+  background: #dcfce7;
+  color: #166534;
 }
 
-.btn-primary:hover {
-  background: var(--primary-hover);
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
 }
 
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  margin-bottom: 2rem;
 }
 
-.dashboard-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  grid-template-rows: auto auto;
-  gap: 24px;
-}
-
-.panel {
-  background: var(--bg-secondary);
-  border-radius: 12px;
-  padding: 20px;
-}
-
-.panel-header {
+.stat-card {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-bottom: 16px;
+  gap: 1rem;
+  padding: 1.25rem;
+  background: white;
+  border-radius: 0.5rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
-.panel-header h2 {
-  font-size: 16px;
+.stat-icon {
+  font-size: 2rem;
+}
+
+.stat-value {
+  font-size: 1.5rem;
   font-weight: 600;
-  color: var(--text-primary);
-  margin: 0;
 }
 
-.view-all {
-  font-size: 13px;
-  color: var(--primary-color);
-  text-decoration: none;
+.stat-label {
+  color: #6b7280;
+  font-size: 0.875rem;
 }
 
-.view-all:hover {
-  text-decoration: underline;
+section {
+  margin-bottom: 2rem;
 }
 
-.actions-grid {
+section h2 {
+  font-size: 1.25rem;
+  margin-bottom: 1rem;
+}
+
+.runs-list {
+  background: white;
+  border-radius: 0.5rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+}
+
+.run-item {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 12px;
-}
-
-.action-card {
-  display: flex;
-  flex-direction: column;
+  grid-template-columns: 1fr auto auto auto;
+  gap: 1rem;
+  padding: 1rem;
+  border-bottom: 1px solid #f3f4f6;
   align-items: center;
-  gap: 8px;
-  padding: 20px;
-  background: var(--bg-primary);
-  border-radius: 10px;
-  text-decoration: none;
-  transition: all 0.2s;
 }
 
-.action-card:hover {
-  background: var(--bg-hover);
-  transform: translateY(-2px);
+.run-item:last-child {
+  border-bottom: none;
 }
 
-.action-icon {
-  font-size: 28px;
-}
-
-.action-label {
-  font-size: 13px;
-  color: var(--text-secondary);
+.run-workflow {
   font-weight: 500;
 }
 
-.workflows-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
+.run-id {
+  color: #6b7280;
+  font-size: 0.875rem;
+  margin-left: 0.5rem;
 }
 
-.workflow-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 12px;
-  background: var(--bg-primary);
-  border-radius: 8px;
+.status-badge {
+  padding: 0.25rem 0.75rem;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-transform: uppercase;
 }
 
-.workflow-info {
-  flex: 1;
-  min-width: 0;
+.status-badge.pending {
+  background: #fef3c7;
+  color: #92400e;
 }
 
-.workflow-name {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--text-primary);
-  margin: 0;
+.status-badge.running {
+  background: #dbeafe;
+  color: #1e40af;
+}
+
+.status-badge.success {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.status-badge.failed {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.status-badge.stopped {
+  background: #f3f4f6;
+  color: #4b5563;
+}
+
+.run-time {
+  color: #6b7280;
+  font-size: 0.875rem;
+}
+
+.run-steps {
+  color: #6b7280;
+  font-size: 0.875rem;
+}
+
+.workflows-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+.workflow-card {
+  background: white;
+  border-radius: 0.5rem;
+  padding: 1.25rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+.workflow-card h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1.125rem;
 }
 
 .workflow-desc {
-  font-size: 12px;
-  color: var(--text-muted);
-  margin: 4px 0 0 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  color: #6b7280;
+  font-size: 0.875rem;
+  margin: 0 0 1rem;
 }
 
 .workflow-meta {
   display: flex;
-  align-items: center;
-  gap: 12px;
+  gap: 1rem;
+  font-size: 0.75rem;
+  color: #9ca3af;
+  margin-bottom: 1rem;
 }
 
-.step-count {
-  font-size: 12px;
-  color: var(--text-secondary);
-  background: var(--bg-secondary);
-  padding: 4px 8px;
-  border-radius: 4px;
+.workflow-actions {
+  display: flex;
+  gap: 0.5rem;
 }
 
-.empty {
+.btn-run,
+.btn-edit {
+  padding: 0.5rem 1rem;
+  border-radius: 0.375rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: none;
   text-align: center;
-  padding: 40px;
-  color: var(--text-muted);
 }
 
-@media (max-width: 1200px) {
-  .stats-grid {
-    grid-template-columns: repeat(2, 1fr);
-  }
-  
-  .dashboard-grid {
-    grid-template-columns: 1fr;
-  }
+.btn-run {
+  background: #3b82f6;
+  color: white;
+  border: none;
 }
 
-@media (max-width: 600px) {
-  .stats-grid {
-    grid-template-columns: 1fr;
-  }
+.btn-run:hover {
+  background: #2563eb;
+}
+
+.btn-edit {
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #d1d5db;
+}
+
+.btn-edit:hover {
+  background: #e5e7eb;
+}
+
+.empty-state {
+  text-align: center;
+  padding: 2rem;
+  color: #6b7280;
+  background: white;
+  border-radius: 0.5rem;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 </style>
