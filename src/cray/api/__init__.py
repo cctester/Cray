@@ -4,6 +4,7 @@ Cray REST API and WebSocket server.
 
 import asyncio
 import json
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
@@ -23,10 +24,11 @@ from cray.plugins import PluginManager
 # Models
 class WorkflowCreate(BaseModel):
     name: str
-    content: str
+    content: Optional[str] = ""
 
 
 class WorkflowRunRequest(BaseModel):
+    workflow_id: Optional[str] = None
     input: Optional[Dict[str, Any]] = None
 
 
@@ -53,9 +55,68 @@ websocket_clients: List[WebSocket] = []
 def create_app(workflows_dir: str = "./workflows") -> FastAPI:
     """Create FastAPI application."""
     app = FastAPI(title="Cray API", version="1.0.0")
-    
+
+    # Metrics
+    from cray.core.metrics import get_metrics_collector
+    metrics_collector = get_metrics_collector()
+
+    @app.get("/api/metrics/summary")
+    async def get_metrics_summary():
+        """Get metrics summary."""
+        collector = get_metrics_collector()
+        return collector.get_summary()
+
+    @app.get("/api/metrics/workflows")
+    async def get_workflow_metrics(workflow_name: Optional[str] = None, limit: int = 100):
+        """Get workflow execution metrics."""
+        collector = get_metrics_collector()
+        return collector.get_workflow_metrics(workflow_name, limit)
+
+    @app.get("/metrics")
+    async def get_metrics():
+        """Get metrics summary (alias for /api/metrics/summary)."""
+        collector = get_metrics_collector()
+        return collector.get_summary()
+
+    @app.get("/api/metrics/realtime")
+    async def get_realtime_metrics():
+        """Get real-time system metrics."""
+        import time
+        collector = get_metrics_collector()
+        summary = collector.get_summary()
+        return {
+            "timestamp": time.time(),
+            "workflows": {
+                "total_runs": summary["total_runs"],
+                "successful": summary["successful"],
+                "failed": summary["failed"],
+                "running": summary["running"],
+                "success_rate": round(summary["success_rate"] * 100, 1),
+                "avg_duration": round(summary["avg_duration_seconds"], 2)
+            },
+            "system": {
+                "uptime_seconds": int(summary["uptime_seconds"])
+            }
+        }
+
+    @app.get("/api/metrics/prometheus")
+    async def get_prometheus_metrics():
+        """Get Prometheus-compatible metrics."""
+        collector = get_metrics_collector()
+        summary = collector.get_summary()
+        lines = [
+            f'cray_total_runs {summary["total_runs"]}',
+            f'cray_successful {summary["successful"]}',
+            f'cray_failed {summary["failed"]}',
+            f'cray_running {summary["running"]}',
+            f'cray_success_rate {summary["success_rate"]}',
+            f'cray_avg_duration_seconds {summary["avg_duration_seconds"]}',
+        ]
+        return Response(content="\n".join(lines), media_type="text/plain")
+
     # Load workflows
     workflows_path = Path(workflows_dir)
+    workflows_path.mkdir(parents=True, exist_ok=True)
     if workflows_path.exists():
         for file in workflows_path.glob("*.yaml"):
             try:
@@ -79,14 +140,65 @@ def create_app(workflows_dir: str = "./workflows") -> FastAPI:
     async def list_workflows():
         """List all workflows."""
         return list(workflows.values())
-    
+
+    @app.post("/api/workflows")
+    async def create_workflow(request: WorkflowCreate):
+        """Create a new workflow."""
+        if request.name in workflows:
+            raise HTTPException(status_code=400, detail="Workflow already exists")
+
+        content = request.content or f"name: {request.name}\ndescription: New workflow\nsteps: []\n"
+        file_path = workflows_path / f"{request.name}.yaml"
+        file_path.write_text(content)
+
+        workflows[request.name] = {
+            "id": request.name,
+            "name": request.name,
+            "version": "1.0.0",
+            "description": "",
+            "file_path": str(file_path),
+            "steps": [],
+            "created_at": datetime.now().isoformat(),
+            "updated_at": datetime.now().isoformat(),
+        }
+
+        return {"created": request.name, "file": str(file_path)}
+
     @app.get("/api/workflows/{workflow_id}")
     async def get_workflow(workflow_id: str):
         """Get workflow details."""
         if workflow_id not in workflows:
             raise HTTPException(status_code=404, detail="Workflow not found")
-        return workflows[workflow_id]
-    
+        wf = workflows[workflow_id].copy()
+        file_path = wf.get("file_path") or str(workflows_path / f"{workflow_id}.yaml")
+        if Path(file_path).exists():
+            wf_obj = Workflow.from_yaml(file_path)
+            wf["content"] = Path(file_path).read_text()
+            wf["steps"] = [{"name": s.name, "plugin": s.plugin, "action": s.action, "params": s.params} for s in wf_obj.steps]
+        return wf
+
+    @app.put("/api/workflows/{workflow_id}")
+    async def update_workflow(workflow_id: str, request: WorkflowCreate):
+        """Update a workflow."""
+        file_path = workflows_path / f"{workflow_id}.yaml"
+        content = request.content or f"name: {workflow_id}\ndescription: Updated\nsteps: []\n"
+        file_path.write_text(content)
+
+        # Reload workflow from file
+        wf_obj = Workflow.from_yaml(str(file_path))
+        workflows[workflow_id] = {
+            "id": wf_obj.name,
+            "name": wf_obj.name,
+            "version": wf_obj.version,
+            "description": wf_obj.description,
+            "file_path": str(file_path),
+            "steps": [{"name": s.name, "plugin": s.plugin, "action": s.action, "params": s.params} for s in wf_obj.steps],
+            "created_at": workflows.get(workflow_id, {}).get("created_at", datetime.now().isoformat()),
+            "updated_at": datetime.now().isoformat(),
+        }
+
+        return {"updated": workflow_id}
+
     @app.post("/api/workflows/{workflow_id}/run")
     async def run_workflow(workflow_id: str, request: WorkflowRunRequest):
         """Run a workflow."""
@@ -111,15 +223,44 @@ def create_app(workflows_dir: str = "./workflows") -> FastAPI:
         await broadcast({"type": "run_started", "run": run_data})
         
         # Run workflow in background
-        asyncio.create_task(run_workflow_task(run_id, wf_data["file_path"], request.input))
-        
+        asyncio.create_task(run_workflow_task(run_id, wf_data["file_path"], request.input or {}, workflow_id))
+
         return run_data
-    
+
     @app.get("/api/runs")
     async def list_runs():
         """List all runs."""
         return list(runs.values())
-    
+
+    @app.post("/api/runs")
+    async def create_run(request: WorkflowRunRequest):
+        """Run a workflow by name."""
+        if not request.workflow_id:
+            raise HTTPException(status_code=400, detail="workflow_id required")
+
+        workflow_id = request.workflow_id
+        if workflow_id not in workflows:
+            raise HTTPException(status_code=404, detail="Workflow not found")
+
+        wf_data = workflows[workflow_id]
+        run_id = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{len(runs)}"
+
+        run_data = {
+            "id": run_id,
+            "workflow_id": workflow_id,
+            "workflow_name": wf_data["name"],
+            "status": "pending",
+            "started_at": datetime.now().isoformat(),
+            "input": request.input or {},
+            "steps": [],
+        }
+        runs[run_id] = run_data
+
+        await broadcast({"type": "run_started", "run": run_data})
+        asyncio.create_task(run_workflow_task(run_id, wf_data["file_path"], request.input or {}, workflow_id))
+
+        return run_data
+
     @app.get("/api/runs/{run_id}")
     async def get_run(run_id: str):
         """Get run details."""
@@ -312,17 +453,18 @@ def create_app(workflows_dir: str = "./workflows") -> FastAPI:
             except Exception:
                 pass
     
-    async def run_workflow_task(run_id: str, workflow_path: str, input_data: dict):
+    async def run_workflow_task(run_id: str, workflow_path: str, input_data: dict, workflow_name: str):
         """Run workflow in background."""
+        start_time = time.time()
         try:
             runs[run_id]["status"] = "running"
             await broadcast({"type": "run_updated", "run": runs[run_id]})
-            
+
             # Run workflow
             workflow = Workflow.from_yaml(workflow_path)
             runner = WorkflowRunner()
             result = await runner.run(workflow, input_data or {})
-            
+
             # Update run
             runs[run_id]["status"] = "success"
             runs[run_id]["completed_at"] = datetime.now().isoformat()
@@ -331,96 +473,38 @@ def create_app(workflows_dir: str = "./workflows") -> FastAPI:
                 (datetime.fromisoformat(runs[run_id]["completed_at"]) -
                  datetime.fromisoformat(runs[run_id]["started_at"])).total_seconds() * 1000
             )
-            
+
+            # Record metrics
+            metrics_collector._increment_counter(
+                f"cray_workflow_total",
+                labels={"workflow": workflow_name, "status": "success"}
+            )
+            metrics_collector._record_histogram(
+                f"cray_workflow_duration_seconds",
+                time.time() - start_time,
+                labels={"workflow": workflow_name}
+            )
+
         except Exception as e:
             logger.error(f"Workflow run failed: {e}")
             runs[run_id]["status"] = "failed"
             runs[run_id]["error"] = str(e)
             runs[run_id]["completed_at"] = datetime.now().isoformat()
-        
-        await broadcast({"type": "run_completed", "run": runs[run_id]})
 
-        # Metrics API
-        from cray.core.metrics import get_metrics_collector
-
-        @app.get("/api/metrics/prometheus")
-        async def get_prometheus_metrics():
-            """Get Prometheus-compatible metrics."""
-            collector = get_metrics_collector()
-            return Response(
-                content=collector.get_prometheus_metrics(),
-                media_type="text/plain; version=0.0.4"
+            # Record metrics for failure
+            metrics_collector._increment_counter(
+                f"cray_workflow_total",
+                labels={"workflow": workflow_name, "status": "failed"}
+            )
+            metrics_collector._record_histogram(
+                f"cray_workflow_duration_seconds",
+                time.time() - start_time,
+                labels={"workflow": workflow_name}
             )
 
-        @app.get("/api/metrics/summary")
-        async def get_metrics_summary():
-            """Get metrics summary."""
-            collector = get_metrics_collector()
-            return collector.get_summary()
+        await broadcast({"type": "run_completed", "run": runs[run_id]})
 
-        @app.get("/api/metrics/workflows")
-        async def get_workflow_metrics(
-            workflow_name: Optional[str] = None,
-            limit: int = 100
-        ):
-            """Get workflow execution metrics."""
-            collector = get_metrics_collector()
-            metrics = collector.get_workflow_metrics(workflow_name)
-            return [
-                {
-                    "workflow_name": m.workflow_name,
-                    "run_id": m.run_id,
-                    "status": m.status,
-                    "duration": m.duration,
-                    "steps_total": m.steps_total,
-                    "steps_completed": m.steps_completed,
-                    "steps_failed": m.steps_failed,
-                    "start_time": m.start_time,
-                    "end_time": m.end_time,
-                    "error": m.error
-                }
-                for m in metrics[:limit]
-            ]
-
-        @app.get("/api/metrics/realtime")
-        async def get_realtime_metrics():
-            """Get real-time system metrics."""
-            import time
-            data = {
-                "timestamp": time.time(),
-                "workflows": {},
-                "system": {}
-            }
-
-            collector = get_metrics_collector()
-            summary = collector.get_summary()
-
-            data["workflows"] = {
-                "total_runs": summary["total_runs"],
-                "successful": summary["successful"],
-                "failed": summary["failed"],
-                "running": summary["running"],
-                "success_rate": round(summary["success_rate"] * 100, 1),
-                "avg_duration": round(summary["avg_duration_seconds"], 2)
-            }
-
-            # System metrics
-            try:
-                import psutil
-                process = psutil.Process()
-                data["system"] = {
-                    "memory_mb": round(process.memory_info().rss / 1024 / 1024, 1),
-                    "cpu_percent": process.cpu_percent(),
-                    "uptime_seconds": int(summary["uptime_seconds"])
-                }
-            except ImportError:
-                data["system"] = {
-                    "uptime_seconds": int(summary["uptime_seconds"])
-                }
-
-            return data
-
-        # Health check endpoint
+# Health check endpoint
     @app.get("/api/health")
     async def health_check():
         """Health check endpoint."""
@@ -439,6 +523,9 @@ def create_app(workflows_dir: str = "./workflows") -> FastAPI:
         @app.get("/{path:path}")
         async def serve_dashboard(path: str):
             """Serve dashboard for all non-API routes."""
+            excluded = ["api", "docs", "redoc", "openapi", "assets", "ws"]
+            if any(path.startswith(p) for p in excluded):
+                raise HTTPException(status_code=404, detail="Not found")
             return FileResponse(dashboard_path / "index.html")
 
     return app
