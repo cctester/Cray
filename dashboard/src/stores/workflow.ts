@@ -126,6 +126,32 @@ export const useWorkflowStore = defineStore('workflow', () => {
     }
   }
 
+  async function fetchVersions(workflowId: string) {
+    try {
+      const response = await fetch(`/api/workflows/${workflowId}/versions`)
+      if (response.ok) {
+        return await response.json()
+      }
+    } catch (e) {
+      console.error('Failed to fetch versions:', e)
+    }
+    return []
+  }
+
+  async function rollbackWorkflow(workflowId: string, versionId: string) {
+    try {
+      const response = await fetch(`/api/workflows/${workflowId}/rollback/${versionId}`, {
+        method: 'POST'
+      })
+      if (response.ok) {
+        return true
+      }
+    } catch (e) {
+      console.error('Failed to rollback:', e)
+    }
+    return false
+  }
+
   async function runWorkflow(workflowId: string, input?: Record<string, any>) {
     try {
       const response = await fetch('/api/runs', {

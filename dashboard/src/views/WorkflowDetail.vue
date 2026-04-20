@@ -88,6 +88,9 @@ function formatDate(date: string) {
         <button class="btn btn-secondary" @click="showYaml = !showYaml">
           {{ showYaml ? 'View Visual' : 'View YAML' }}
         </button>
+        <button class="btn btn-secondary" @click="router.push(`/workflows/${workflowId}/versions`)">
+          📜 Versions
+        </button>
         <button class="btn btn-secondary" @click="editWorkflow">
           ✏️ Edit
         </button>

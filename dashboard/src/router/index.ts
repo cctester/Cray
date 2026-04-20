@@ -48,6 +48,11 @@ const router = createRouter({
       name: 'metrics',
       component: () => import('../views/Metrics.vue'),
     },
+    {
+      path: '/workflows/:id/versions',
+      name: 'workflow-versions',
+      component: () => import('../views/Versions.vue'),
+    },
   ],
 })
 
