@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 from enum import Enum
+from datetime import datetime
 import yaml
 from pydantic import BaseModel, Field
 
@@ -218,12 +219,17 @@ class WorkflowManager:
         for yaml_file in self.workflows_dir.glob("*.yaml"):
             try:
                 workflow = Workflow.from_yaml(yaml_file)
+                with open(yaml_file, "r", encoding="utf-8") as f:
+                    content = f.read()
+                mtime = datetime.fromtimestamp(yaml_file.stat().st_mtime).isoformat()
                 self._workflows[workflow.name] = {
                     "id": workflow.name,
                     "name": workflow.name,
                     "version": workflow.version,
                     "description": workflow.description,
                     "file_path": str(yaml_file),
+                    "content": content,
+                    "updated_at": mtime,
                     "steps": [{"name": s.name, "plugin": s.plugin} for s in workflow.steps],
                 }
             except Exception as e:
@@ -242,34 +248,59 @@ class WorkflowManager:
         workflow_id = workflow_data.get("id") or workflow_data.get("name")
         workflow_path = self.workflows_dir / f"{workflow_id}.yaml"
 
-        # Build workflow object
-        workflow_dict = {
-            "name": workflow_id,
-            "version": workflow_data.get("version", "1.0"),
-            "description": workflow_data.get("description", ""),
-            "steps": workflow_data.get("steps", []),
-        }
+        # Check if content field is provided (YAML from editor)
+        now = datetime.utcnow().isoformat()
+        if workflow_data.get("content"):
+            with open(workflow_path, "w", encoding="utf-8") as f:
+                f.write(workflow_data["content"])
 
-        if workflow_data.get("variables"):
-            workflow_dict["variables"] = workflow_data["variables"]
-        if workflow_data.get("triggers"):
-            workflow_dict["triggers"] = workflow_data["triggers"]
+            # Parse to get metadata for cache
+            parsed = yaml.safe_load(workflow_data["content"])
+            workflow_name = parsed.get("name", workflow_id)
+            workflow_dict = {
+                "id": workflow_name,
+                "name": workflow_name,
+                "version": parsed.get("version", "1.0"),
+                "description": parsed.get("description", ""),
+                "file_path": str(workflow_path),
+                "content": workflow_data["content"],
+                "updated_at": now,
+                "steps": [{"name": s.get("name"), "plugin": s.get("plugin")} for s in parsed.get("steps", [])],
+            }
+        else:
+            # Build workflow object from dict fields
+            workflow_dict = {
+                "name": workflow_id,
+                "version": workflow_data.get("version", "1.0"),
+                "description": workflow_data.get("description", ""),
+                "steps": workflow_data.get("steps", []),
+            }
 
-        # Save to file
-        with open(workflow_path, "w", encoding="utf-8") as f:
-            yaml.dump(workflow_dict, f, default_flow_style=False, allow_unicode=True)
+            if workflow_data.get("variables"):
+                workflow_dict["variables"] = workflow_data["variables"]
+            if workflow_data.get("triggers"):
+                workflow_dict["triggers"] = workflow_data["triggers"]
 
-        # Update cache
-        self._workflows[workflow_id] = {
-            "id": workflow_id,
-            "name": workflow_id,
-            "version": workflow_dict["version"],
-            "description": workflow_dict["description"],
-            "file_path": str(workflow_path),
-            "steps": workflow_data.get("steps", []),
-        }
+            # Save to file
+            with open(workflow_path, "w", encoding="utf-8") as f:
+                yaml.dump(workflow_dict, f, default_flow_style=False, allow_unicode=True)
 
-        return self._workflows[workflow_id]
+            workflow_dict = {
+                "id": workflow_id,
+                "name": workflow_id,
+                "version": workflow_data.get("version", "1.0"),
+                "description": workflow_data.get("description", ""),
+                "file_path": str(workflow_path),
+                "content": workflow_data.get("content", ""),
+                "updated_at": now,
+                "steps": workflow_data.get("steps", []),
+            }
+
+        # Update cache - use workflow name from YAML as key
+        cache_key = workflow_dict.get("name") or workflow_id
+        self._workflows[cache_key] = workflow_dict
+
+        return self._workflows[cache_key]
 
     def delete_workflow(self, workflow_id: str):
         """Delete a workflow."""

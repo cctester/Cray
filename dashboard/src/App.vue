@@ -1,22 +1,16 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted, watch } from 'vue'
 import Sidebar from './components/Sidebar.vue'
 import { wsService } from './services/websocket'
 import { useWorkflowStore } from './stores/workflow'
+import { useSettings } from './stores/settings'
 
 const store = useWorkflowStore()
+const { settings } = useSettings()
 
 onMounted(async () => {
-  // Apply theme from settings
-  const stored = localStorage.getItem('cray-settings')
-  if (stored) {
-    const settings = JSON.parse(stored)
-    document.documentElement.setAttribute('data-theme', settings.theme || 'dark')
-  } else {
-    document.documentElement.setAttribute('data-theme', 'dark')
-  }
+  document.documentElement.setAttribute('data-theme', settings.theme)
 
-  // Connect WebSocket on app mount
   if (!wsService.isConnected()) {
     try {
       await wsService.connect()
@@ -28,8 +22,11 @@ onMounted(async () => {
   }
 })
 
+watch(() => settings.theme, (theme) => {
+  document.documentElement.setAttribute('data-theme', theme)
+})
+
 onUnmounted(() => {
-  // Cleanup on app unmount
   store.cleanupWebSocket()
   wsService.disconnect()
 })

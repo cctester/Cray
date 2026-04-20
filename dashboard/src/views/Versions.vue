@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useWorkflowStore } from '../stores/workflow'
 
@@ -11,10 +11,18 @@ const workflowId = route.params.id as string
 const versions = ref<any[]>([])
 const loading = ref(true)
 const rollingBack = ref(false)
+const comparing = ref(false)
+const diffResult = ref<any>(null)
+const compareFrom = ref('')
+const compareTo = ref('')
 
 onMounted(async () => {
   try {
     versions.value = await store.fetchVersions(workflowId)
+    if (versions.value.length >= 2) {
+      compareFrom.value = versions.value[1].version_id
+      compareTo.value = versions.value[0].version_id
+    }
   } catch (e) {
     console.error('Failed to load versions:', e)
   } finally {
@@ -24,7 +32,7 @@ onMounted(async () => {
 
 async function rollback(versionId: string) {
   if (!confirm(`Rollback to version ${versionId}?`)) return
-  
+
   rollingBack.value = true
   try {
     const success = await store.rollbackWorkflow(workflowId, versionId)
@@ -33,6 +41,17 @@ async function rollback(versionId: string) {
     }
   } finally {
     rollingBack.value = false
+  }
+}
+
+async function compareVersions() {
+  if (!compareFrom.value || !compareTo.value) return
+
+  comparing.value = true
+  try {
+    diffResult.value = await store.getDiff(workflowId, compareFrom.value, compareTo.value)
+  } finally {
+    comparing.value = false
   }
 }
 
@@ -53,11 +72,41 @@ function formatDate(date: string) {
     </div>
 
     <div class="versions-list" v-else-if="versions.length > 0">
-      <div 
-        v-for="version in versions" 
-        :key="version.version_id"
-        class="version-card"
-      >
+
+      <!-- Compare section -->
+      <div class="compare-section" v-if="versions.length >= 2">
+        <h2>Compare Versions</h2>
+        <div class="compare-controls">
+          <select v-model="compareFrom" class="select-version">
+            <option v-for="v in versions" :key="v.version_id" :value="v.version_id">
+              {{ v.version_id }}
+            </option>
+          </select>
+          <span class="compare-arrow">→</span>
+          <select v-model="compareTo" class="select-version">
+            <option v-for="v in versions" :key="v.version_id" :value="v.version_id">
+              {{ v.version_id }}
+            </option>
+          </select>
+          <button class="btn btn-primary" @click="compareVersions" :disabled="comparing">
+            {{ comparing ? 'Comparing...' : 'Compare' }}
+          </button>
+        </div>
+
+        <div class="diff-result" v-if="diffResult">
+          <div class="diff-summary">
+            <span class="diff-additions">+{{ diffResult.additions }}</span>
+            <span class="diff-deletions">-{{ diffResult.deletions }}</span>
+          </div>
+          <div class="diff-changes">
+            <div v-for="(change, idx) in diffResult.changes" :key="idx" class="diff-line" :class="change.type">
+              {{ change.type === 'add' ? '+' : '-' }} {{ change.line }}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div v-for="version in versions" :key="version.version_id" class="version-card">
         <div class="version-info">
           <h3 class="version-id">{{ version.version_id }}</h3>
           <p class="version-date">{{ formatDate(version.created_at) }}</p>
@@ -68,11 +117,7 @@ function formatDate(date: string) {
           </div>
         </div>
         <div class="version-actions">
-          <button 
-            class="btn btn-secondary" 
-            @click="rollback(version.version_id)"
-            :disabled="rollingBack"
-          >
+          <button class="btn btn-secondary" @click="rollback(version.version_id)" :disabled="rollingBack">
             Rollback
           </button>
         </div>
@@ -202,5 +247,74 @@ function formatDate(date: string) {
   text-align: center;
   padding: 40px;
   color: var(--text-secondary);
+}
+
+.compare-section {
+  padding: 16px;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  margin-bottom: 16px;
+}
+
+.compare-section h2 {
+  font-size: 16px;
+  margin: 0 0 12px 0;
+  color: var(--text-primary);
+}
+
+.compare-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.select-version {
+  padding: 8px 12px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-primary);
+}
+
+.compare-arrow {
+  color: var(--text-secondary);
+}
+
+.diff-result {
+  margin-top: 16px;
+  padding: 12px;
+  background: var(--bg-primary);
+  border-radius: 6px;
+}
+
+.diff-summary {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.diff-additions {
+  color: var(--success-color);
+}
+
+.diff-deletions {
+  color: var(--error-color);
+}
+
+.diff-changes {
+  font-family: monospace;
+  font-size: 12px;
+}
+
+.diff-line {
+  padding: 2px 0;
+}
+
+.diff-line.add {
+  color: var(--success-color);
+}
+
+.diff-line.delete {
+  color: var(--error-color);
 }
 </style>

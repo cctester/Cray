@@ -299,9 +299,9 @@ def schedule_remove(job_id: str):
 @click.option("--workflow-dir", default="workflows", help="Workflow directory")
 def serve(host: str, port: int, workflow_dir: str):
     """Start the web API server."""
-    from cray.api import create_app
+    from cray.web.app import app
     try:
-        import uvicorn        
+        import uvicorn
     except ImportError:
         console.print("[red]Error:[/red] Web dependencies not installed")
         console.print("Install with: pip install cray")
@@ -315,7 +315,6 @@ def serve(host: str, port: int, workflow_dir: str):
         title="🦞 Starting Server"
     ))
 
-    app = create_app(workflows_dir=workflow_dir)
     uvicorn.run(app, host=host, port=port)
 
 

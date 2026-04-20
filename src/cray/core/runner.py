@@ -436,10 +436,19 @@ class Runner:
 class WorkflowRunner:
     """High-level workflow runner with event support and run management."""
 
-    def __init__(self, plugin_manager: Optional[PluginManager] = None):
+    def __init__(
+        self,
+        plugin_manager: Optional[PluginManager] = None,
+        storage: Any = None
+    ):
         self.runner = Runner(plugin_manager)
         self._runs: Dict[str, Dict[str, Any]] = {}
         self._event_handler: Optional[EventHandler] = None
+        self._storage = storage
+
+    def set_storage(self, storage: Any):
+        """Set storage backend for persistence."""
+        self._storage = storage
 
     def set_event_handler(self, handler: EventHandler):
         """Set event handler for workflow events."""
@@ -452,6 +461,27 @@ class WorkflowRunner:
                 await self._event_handler(event_type, data)
             except Exception as e:
                 logger.warning(f"Event handler error: {e}")
+
+    async def _persist_run(self, run_info: Dict[str, Any]):
+        """Persist run to storage if configured."""
+        logger.info(f"[Runner] _persist_run called with storage={self._storage}")
+        if self._storage:
+            try:
+                await self._storage.save_run(run_info)
+                logger.info(f"[Runner] Saved run {run_info.get('id')} to storage")
+            except Exception as e:
+                logger.warning(f"Failed to persist run: {e}")
+
+    async def load_runs(self):
+        """Load runs from storage on startup."""
+        if self._storage:
+            try:
+                runs = await self._storage.list_runs(limit=1000)
+                for run in runs:
+                    self._runs[run["id"]] = run
+                logger.info(f"Loaded {len(runs)} runs from storage")
+            except Exception as e:
+                logger.warning(f"Failed to load runs: {e}")
 
     async def run_workflow(
         self,
@@ -474,6 +504,9 @@ class WorkflowRunner:
             "steps": []
         }
         self._runs[run_id] = run_info
+
+        # Persist run
+        await self._persist_run(run_info)
 
         # Emit run started event
         await self._emit_event("run_started", {"run": run_info})
@@ -522,6 +555,9 @@ class WorkflowRunner:
             run_info["error"] = str(e)
             run_info["completed_at"] = datetime.utcnow().isoformat()
 
+        # Persist run update
+        await self._persist_run(run_info)
+
         # Emit completion event
         await self._emit_event("run_completed", {"run": run_info})
 
@@ -535,6 +571,7 @@ class WorkflowRunner:
         run_info = {
             "id": run_id,
             "workflow_id": workflow.name,
+            "workflow_name": workflow.name,
             "status": "pending",
             "started_at": datetime.utcnow().isoformat(),
             "completed_at": None,
@@ -545,10 +582,14 @@ class WorkflowRunner:
         }
         self._runs[run_id] = run_info
 
+        # Persist run
+        await self._persist_run(run_info)
+
         await self._emit_event("run_started", {"run": run_info})
 
         try:
             run_info["status"] = "running"
+            await self._persist_run(run_info)
             await self._emit_event("run_updated", {"run": run_info})
 
             task = await self.runner.run(workflow)
@@ -576,6 +617,9 @@ class WorkflowRunner:
             run_info["error"] = str(e)
             run_info["completed_at"] = datetime.utcnow().isoformat()
 
+        # Persist run update
+        await self._persist_run(run_info)
+
         await self._emit_event("run_completed", {"run": run_info})
 
         return run_info
@@ -589,6 +633,7 @@ class WorkflowRunner:
         if run_info["status"] == "running":
             run_info["status"] = "stopped"
             run_info["completed_at"] = datetime.utcnow().isoformat()
+            await self._persist_run(run_info)
             await self._emit_event("run_completed", {"run": run_info})
 
         return {"status": "stopped", "run_id": run_id}

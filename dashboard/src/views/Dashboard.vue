@@ -2,9 +2,14 @@
   <div class="dashboard">
     <header class="dashboard-header">
       <h1>Cray Dashboard</h1>
-      <div class="connection-status" :class="{ connected: wsConnected }">
-        <span class="status-dot"></span>
-        {{ wsConnected ? 'Connected' : 'Disconnected' }}
+      <div class="header-actions">
+        <button class="theme-toggle" @click="toggleTheme" :title="settings.theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'">
+          {{ settings.theme === 'dark' ? '☀️' : '🌙' }}
+        </button>
+        <div class="connection-status" :class="{ connected: wsConnected }">
+          <span class="status-dot"></span>
+          {{ wsConnected ? 'Connected' : 'Disconnected' }}
+        </div>
       </div>
     </header>
 
@@ -111,8 +116,10 @@
 import { computed, onMounted, onUnmounted } from 'vue'
 import { useWorkflowStore } from '@/stores/workflow'
 import { wsService } from '@/services/websocket'
+import { useSettings } from '@/stores/settings'
 
 const store = useWorkflowStore()
+const { settings, toggleTheme } = useSettings()
 
 // Computed
 const workflows = computed(() => store.workflows)
@@ -186,20 +193,40 @@ onUnmounted(() => {
   margin: 0;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.theme-toggle {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 18px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.theme-toggle:hover {
+  background: var(--bg-hover);
+}
+
 .connection-status {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   padding: 0.5rem 1rem;
-  background: #fee2e2;
+  background: var(--error-color);
   border-radius: 9999px;
   font-size: 0.875rem;
-  color: #991b1b;
+  color: white;
 }
 
 .connection-status.connected {
-  background: #dcfce7;
-  color: #166534;
+  background: var(--success-color);
+  color: #000;
 }
 
 .status-dot {
@@ -221,7 +248,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 1rem;
   padding: 1.25rem;
-  background: white;
+  background: var(--bg-secondary);
   border-radius: 0.5rem;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
@@ -233,10 +260,11 @@ onUnmounted(() => {
 .stat-value {
   font-size: 1.5rem;
   font-weight: 600;
+  color: var(--text-primary);
 }
 
 .stat-label {
-  color: #6b7280;
+  color: var(--text-muted);
   font-size: 0.875rem;
 }
 
@@ -250,7 +278,7 @@ section h2 {
 }
 
 .runs-list {
-  background: white;
+  background: var(--bg-secondary);
   border-radius: 0.5rem;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   overflow: hidden;
@@ -261,7 +289,7 @@ section h2 {
   grid-template-columns: 1fr auto auto auto;
   gap: 1rem;
   padding: 1rem;
-  border-bottom: 1px solid #f3f4f6;
+  border-bottom: 1px solid var(--border-color);
   align-items: center;
 }
 
@@ -271,10 +299,11 @@ section h2 {
 
 .run-workflow {
   font-weight: 500;
+  color: var(--text-primary);
 }
 
 .run-id {
-  color: #6b7280;
+  color: var(--text-muted);
   font-size: 0.875rem;
   margin-left: 0.5rem;
 }
@@ -288,37 +317,37 @@ section h2 {
 }
 
 .status-badge.pending {
-  background: #fef3c7;
-  color: #92400e;
+  background: var(--warning-color);
+  color: #000;
 }
 
 .status-badge.running {
-  background: #dbeafe;
-  color: #1e40af;
+  background: var(--primary-color);
+  color: #fff;
 }
 
 .status-badge.success {
-  background: #dcfce7;
-  color: #166534;
+  background: var(--success-color);
+  color: #000;
 }
 
 .status-badge.failed {
-  background: #fee2e2;
-  color: #991b1b;
+  background: var(--error-color);
+  color: #fff;
 }
 
 .status-badge.stopped {
-  background: #f3f4f6;
-  color: #4b5563;
+  background: var(--bg-hover);
+  color: var(--text-secondary);
 }
 
 .run-time {
-  color: #6b7280;
+  color: var(--text-muted);
   font-size: 0.875rem;
 }
 
 .run-steps {
-  color: #6b7280;
+  color: var(--text-muted);
   font-size: 0.875rem;
 }
 
@@ -329,7 +358,7 @@ section h2 {
 }
 
 .workflow-card {
-  background: white;
+  background: var(--bg-secondary);
   border-radius: 0.5rem;
   padding: 1.25rem;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
@@ -338,10 +367,11 @@ section h2 {
 .workflow-card h3 {
   margin: 0 0 0.5rem;
   font-size: 1.125rem;
+  color: var(--text-primary);
 }
 
 .workflow-desc {
-  color: #6b7280;
+  color: var(--text-muted);
   font-size: 0.875rem;
   margin: 0 0 1rem;
 }
@@ -350,7 +380,7 @@ section h2 {
   display: flex;
   gap: 1rem;
   font-size: 0.75rem;
-  color: #9ca3af;
+  color: var(--text-muted);
   margin-bottom: 1rem;
 }
 
@@ -371,30 +401,30 @@ section h2 {
 }
 
 .btn-run {
-  background: #3b82f6;
+  background: var(--primary-color);
   color: white;
   border: none;
 }
 
 .btn-run:hover {
-  background: #2563eb;
+  background: var(--primary-hover);
 }
 
 .btn-edit {
-  background: #f3f4f6;
-  color: #374151;
-  border: 1px solid #d1d5db;
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
 }
 
 .btn-edit:hover {
-  background: #e5e7eb;
+  background: var(--bg-primary);
 }
 
 .empty-state {
   text-align: center;
   padding: 2rem;
-  color: #6b7280;
-  background: white;
+  color: var(--text-muted);
+  background: var(--bg-secondary);
   border-radius: 0.5rem;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }

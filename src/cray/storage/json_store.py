@@ -4,6 +4,7 @@ JSON file-based storage backend.
 
 import json
 import asyncio
+import os
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from datetime import datetime
@@ -15,18 +16,21 @@ from cray.storage.base import StorageBackend
 class JsonStore(StorageBackend):
     """
     JSON file-based storage.
-    
-    Stores tasks and workflows in JSON files.
+
+    Stores tasks, workflows, and runs in JSON files.
     """
-    
+
     def __init__(self, data_dir: str = "./data"):
-        self.data_dir = Path(data_dir)
+        self.data_dir = Path(os.path.expanduser(data_dir))
         self.tasks_dir = self.data_dir / "tasks"
         self.workflows_dir = self.data_dir / "workflows"
-        
+        self.runs_dir = self.data_dir / "runs"
+
         # Create directories
         self.tasks_dir.mkdir(parents=True, exist_ok=True)
         self.workflows_dir.mkdir(parents=True, exist_ok=True)
+        self.runs_dir.mkdir(parents=True, exist_ok=True)
+        logger.info(f"[JsonStore] initialized at {self.data_dir}")
     
     def _task_path(self, task_id: str) -> Path:
         """Get path for a task file."""
@@ -151,10 +155,88 @@ class JsonStore(StorageBackend):
     async def delete_workflow(self, name: str) -> bool:
         """Delete a workflow."""
         path = self._workflow_path(name)
-        
+
         if path.exists():
             path.unlink()
             logger.debug(f"Deleted workflow: {name}")
             return True
-        
+
+        return False
+
+    def _run_path(self, run_id: str) -> Path:
+        """Get path for a run file."""
+        return self.runs_dir / f"{run_id}.json"
+
+    async def save_run(self, run_data: Dict[str, Any]) -> str:
+        """Save a run to JSON file."""
+        run_id = run_data.get("id")
+        if not run_id:
+            raise ValueError("Run must have an id")
+
+        path = self._run_path(run_id)
+
+        def write_file():
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(run_data, f, indent=2, default=str)
+
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, write_file)
+
+        logger.debug(f"Saved run: {run_id}")
+        return run_id
+
+    async def get_run(self, run_id: str) -> Optional[Dict[str, Any]]:
+        """Get a run by ID."""
+        path = self._run_path(run_id)
+
+        if not path.exists():
+            return None
+
+        def read_file():
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, read_file)
+
+    async def list_runs(
+        self,
+        workflow_id: Optional[str] = None,
+        status: Optional[str] = None,
+        limit: int = 100,
+        offset: int = 0,
+    ) -> List[Dict[str, Any]]:
+        """List runs with optional filtering."""
+        runs = []
+        run_files = sorted(self.runs_dir.glob("*.json"), reverse=True)
+
+        for run_file in run_files[offset:offset + limit]:
+            def read_file():
+                with open(run_file, "r", encoding="utf-8") as f:
+                    return json.load(f)
+
+            loop = asyncio.get_event_loop()
+            run = await loop.run_in_executor(None, read_file)
+
+            if workflow_id and run.get("workflow_id") != workflow_id:
+                continue
+            if status and run.get("status") != status:
+                continue
+
+            runs.append(run)
+
+            if len(runs) >= limit:
+                break
+
+        return runs
+
+    async def delete_run(self, run_id: str) -> bool:
+        """Delete a run."""
+        path = self._run_path(run_id)
+
+        if path.exists():
+            path.unlink()
+            logger.debug(f"Deleted run: {run_id}")
+            return True
+
         return False

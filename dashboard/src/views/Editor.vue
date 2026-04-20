@@ -146,9 +146,13 @@ async function save() {
     if (response.ok) {
       const saved = await response.json()
       router.push(`/workflows/${workflowId}`)
+    } else {
+      const error = await response.text()
+      alert('Failed to save: ' + error)
     }
   } catch (e) {
     console.error('Failed to save:', e)
+    alert('Failed to save: ' + e.message)
   } finally {
     saving.value = false
   }

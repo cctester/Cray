@@ -1,6 +1,6 @@
 id: simple
 name: simple
-version: "2.0"
+version: "1.2"
 description: ""
 file_path: /home/cc/Documents/Cray/workflows/simple.yaml
 steps:
@@ -15,6 +15,3 @@ steps:
     action: exec
     params:
       command: echo "2nd step"
-
-created_at: 2026-04-19T00:04:02.901728
-updated_at: 2026-04-19T00:04:02.901733

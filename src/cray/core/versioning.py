@@ -85,7 +85,6 @@ class WorkflowVersionManager:
         self.storage_path = Path(storage_path or "~/.cray/versions")
         self.storage_path = self.storage_path.expanduser()
         self.storage_path.mkdir(parents=True, exist_ok=True)
-        self.storage_path.chmod(0o700)
     
     def _get_workflow_dir(self, workflow_name: str) -> Path:
         """Get the version directory for a workflow."""

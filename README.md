@@ -10,8 +10,49 @@ A lightweight automation tool with claws.
 - 📊 **Rich CLI** - Beautiful command line interface
 - 🌐 **Web API** - REST API with FastAPI
 - ⏰ **Scheduling** - Cron-based and interval scheduling
-- 💾 **Storage** - JSON-based task persistence
+- 💾 **Persistence** - JSON, SQLite, or database storage (survives restarts)
 - 🔧 **Built-in Plugins** - Shell, HTTP, File operations included
+
+## Storage & Persistence
+
+Cray supports configurable run persistence so your workflow runs survive server restarts.
+
+### Storage Backends
+
+| Backend | Description | Configuration |
+|---------|-------------|-------------|
+| **json** (default) | JSON files in a directory | `data_dir` |
+| **sqlite** | SQLite database | `db_path` |
+| **postgres** | PostgreSQL (future) | `postgres_url` |
+
+### Configuration
+
+Configure storage via environment variables:
+
+```bash
+# JSON storage (default)
+export CRAY_STORAGE_BACKEND=json
+export CRAY_DATA_DIR=~/.cray/data
+
+# SQLite storage
+export CRAY_STORAGE_BACKEND=sqlite
+export CRAY_DB_PATH=~/.cray/cray.db
+```
+
+Or pass to the runner programmatically:
+
+```python
+from cray.storage import JsonStore, SqliteStore
+from cray.core.runner import WorkflowRunner
+
+# JSON
+runner = WorkflowRunner(storage=JsonStore("~/.cray/data"))
+
+# SQLite
+runner = WorkflowRunner(storage=SqliteStore("~/.cray/cray.db"))
+```
+
+Data is automatically saved on each run status change and loaded on startup.
 
 ## Installation
 

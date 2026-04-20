@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useSettings } from '@/stores/settings'
 
-const settings = ref({
+const { settings, setTheme } = useSettings()
+
+const settingsForm = ref({
   serverUrl: 'http://localhost:8000',
-  theme: 'dark',
+  theme: settings.theme,
   autoRefresh: true,
   refreshInterval: 5,
   showNotifications: true,
@@ -14,19 +17,16 @@ const saving = ref(false)
 const saved = ref(false)
 
 onMounted(() => {
-  const stored = localStorage.getItem('cray-settings')
-  if (stored) {
-    settings.value = { ...settings.value, ...JSON.parse(stored) }
-  }
+  settingsForm.value.theme = settings.theme
 })
 
 async function saveSettings() {
   saving.value = true
   try {
-    localStorage.setItem('cray-settings', JSON.stringify(settings.value))
-    const theme = settings.value.theme || 'dark'
-    document.documentElement.setAttribute('data-theme', theme)
-    console.log('Theme set to:', theme)
+    setTheme(settingsForm.value.theme as 'light' | 'dark')
+    localStorage.setItem('cray-settings', JSON.stringify({
+      theme: settingsForm.value.theme,
+    }))
     await new Promise(r => setTimeout(r, 500))
     saved.value = true
     setTimeout(() => { saved.value = false }, 2000)
@@ -36,7 +36,7 @@ async function saveSettings() {
 }
 
 function resetSettings() {
-  settings.value = {
+  settingsForm.value = {
     serverUrl: 'http://localhost:8000',
     theme: 'dark',
     autoRefresh: true,
@@ -44,19 +44,14 @@ function resetSettings() {
     showNotifications: true,
     logLevel: 'info',
   }
-  onThemeChange()
-  saveSettings()
+  setTheme('dark')
 }
 
 function onThemeChange() {
-  const theme = settings.value.theme
-  if (theme === 'auto') {
-    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
-    document.documentElement.setAttribute('data-theme', prefersDark ? 'dark' : 'light')
-  } else {
-    document.documentElement.setAttribute('data-theme', theme)
+  const theme = settingsForm.value.theme
+  if (theme !== 'auto') {
+    setTheme(theme as 'light' | 'dark')
   }
-  console.log('Theme changed to:', document.documentElement.getAttribute('data-theme'))
 }
 </script>
 

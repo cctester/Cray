@@ -31,6 +31,8 @@ dependencies = [
     "aiohttp>=3.9.0",
     "boto3>=1.34.0",
     "redis>=5.0.0",
+    "psutil>=5.9.0",
+    "psutils",
 ]
 
 [project.optional-dependencies]

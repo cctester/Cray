@@ -39,10 +39,17 @@ export interface Run {
   }>
 }
 
+export interface Plugin {
+  name: string
+  description: string
+  actions: string[]
+}
+
 export const useWorkflowStore = defineStore('workflow', () => {
   // State
   const workflows = ref<Workflow[]>([])
   const runs = ref<Run[]>([])
+  const plugins = ref<Plugin[]>([])
   const currentWorkflow = ref<Workflow | null>(null)
   const currentRun = ref<Run | null>(null)
   const loading = ref(false)
@@ -188,6 +195,21 @@ export const useWorkflowStore = defineStore('workflow', () => {
     }
   }
 
+  async function fetchPlugins() {
+    loading.value = true
+    error.value = null
+
+    try {
+      const response = await fetch(`${API_BASE}/plugins`)
+      if (!response.ok) throw new Error('Failed to fetch plugins')
+      plugins.value = await response.json()
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : 'Unknown error'
+    } finally {
+      loading.value = false
+    }
+  }
+
   async function fetchWorkflow(id: string) {
     loading.value = true
     error.value = null
@@ -306,6 +328,18 @@ export const useWorkflowStore = defineStore('workflow', () => {
     return false
   }
 
+  async function getDiff(workflowId: string, fromVersion: string, toVersion: string) {
+    try {
+      const response = await fetch(`/api/workflows/${workflowId}/diff/${fromVersion}/${toVersion}`)
+      if (response.ok) {
+        return await response.json()
+      }
+    } catch (e) {
+      console.error('Failed to get diff:', e)
+    }
+    return null
+  }
+
   async function runWorkflow(workflowId: string, input?: Record<string, any>) {
     loading.value = true
     error.value = null
@@ -350,6 +384,7 @@ export const useWorkflowStore = defineStore('workflow', () => {
     // State
     workflows,
     runs,
+    plugins,
     currentWorkflow,
     currentRun,
     loading,
@@ -366,12 +401,16 @@ export const useWorkflowStore = defineStore('workflow', () => {
     cleanupWebSocket,
     fetchWorkflows,
     fetchRuns,
+    fetchPlugins,
     fetchWorkflow,
     fetchRun,
     createWorkflow,
     updateWorkflow,
     deleteWorkflow,
     runWorkflow,
-    stopRun
+    stopRun,
+    fetchVersions,
+    rollbackWorkflow,
+    getDiff
   }
 })
