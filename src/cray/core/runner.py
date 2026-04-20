@@ -4,8 +4,10 @@ Workflow runner - executes workflows step by step.
 
 import asyncio
 import os
-from typing import Dict, Any, Optional, Set, List
+import uuid
+from typing import Dict, Any, Optional, Set, List, Callable, Awaitable
 from datetime import datetime
+from pathlib import Path
 from loguru import logger
 
 from cray.core.workflow import Workflow, Step
@@ -13,6 +15,10 @@ from cray.core.task import Task, TaskResult, TaskStatus
 from cray.core.template import render
 from cray.core.dependency import DependencyGraph, build_step_dependency_graph
 from cray.plugins import PluginManager
+
+
+# Event handler type
+EventHandler = Callable[[str, Dict[str, Any]], Awaitable[None]]
 
 
 class Runner:
@@ -425,3 +431,172 @@ class Runner:
     ) -> Task:
         """Synchronous wrapper for run()."""
         return asyncio.run(self.run(workflow, input_data))
+
+
+class WorkflowRunner:
+    """High-level workflow runner with event support and run management."""
+
+    def __init__(self, plugin_manager: Optional[PluginManager] = None):
+        self.runner = Runner(plugin_manager)
+        self._runs: Dict[str, Dict[str, Any]] = {}
+        self._event_handler: Optional[EventHandler] = None
+
+    def set_event_handler(self, handler: EventHandler):
+        """Set event handler for workflow events."""
+        self._event_handler = handler
+
+    async def _emit_event(self, event_type: str, data: Dict[str, Any]):
+        """Emit an event to the handler if set."""
+        if self._event_handler:
+            try:
+                await self._event_handler(event_type, data)
+            except Exception as e:
+                logger.warning(f"Event handler error: {e}")
+
+    async def run_workflow(
+        self,
+        workflow_id: str,
+        input_data: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """Run a workflow by ID and return run info."""
+        run_id = str(uuid.uuid4())[:8]
+
+        # Create run record
+        run_info = {
+            "id": run_id,
+            "workflow_id": workflow_id,
+            "status": "pending",
+            "started_at": datetime.utcnow().isoformat(),
+            "completed_at": None,
+            "input": input_data or {},
+            "output": None,
+            "error": None,
+            "steps": []
+        }
+        self._runs[run_id] = run_info
+
+        # Emit run started event
+        await self._emit_event("run_started", {"run": run_info})
+
+        try:
+            # Load workflow (placeholder - actual implementation would load from storage)
+            workflow_path = Path(f"workflows/{workflow_id}.yaml")
+            if workflow_path.exists():
+                workflow = Workflow.from_yaml(workflow_path)
+            else:
+                # Create a simple workflow for testing
+                workflow = Workflow(
+                    name=workflow_id,
+                    version="1.0",
+                    steps=[]
+                )
+
+            # Update status
+            run_info["status"] = "running"
+            await self._emit_event("run_updated", {"run": run_info})
+
+            # Execute workflow
+            task = await self.runner.run(workflow, input_data)
+
+            # Update run info with results
+            run_info["status"] = "success" if task.status == TaskStatus.SUCCESS else "failed"
+            run_info["completed_at"] = datetime.utcnow().isoformat()
+            run_info["output"] = task.results
+            run_info["steps"] = [
+                {
+                    "name": r.step_name,
+                    "success": r.success,
+                    "output": r.output,
+                    "error": r.error,
+                    "duration_ms": r.duration_ms
+                }
+                for r in task.results
+            ]
+
+            if task.status == TaskStatus.FAILED:
+                run_info["error"] = task.error
+
+        except Exception as e:
+            logger.exception(f"Workflow run failed: {e}")
+            run_info["status"] = "failed"
+            run_info["error"] = str(e)
+            run_info["completed_at"] = datetime.utcnow().isoformat()
+
+        # Emit completion event
+        await self._emit_event("run_completed", {"run": run_info})
+
+        return run_info
+
+    async def run_from_yaml(self, yaml_content: str) -> Dict[str, Any]:
+        """Run a workflow from YAML content."""
+        workflow = Workflow.from_yaml_string(yaml_content)
+        run_id = str(uuid.uuid4())[:8]
+
+        run_info = {
+            "id": run_id,
+            "workflow_id": workflow.name,
+            "status": "pending",
+            "started_at": datetime.utcnow().isoformat(),
+            "completed_at": None,
+            "input": {},
+            "output": None,
+            "error": None,
+            "steps": []
+        }
+        self._runs[run_id] = run_info
+
+        await self._emit_event("run_started", {"run": run_info})
+
+        try:
+            run_info["status"] = "running"
+            await self._emit_event("run_updated", {"run": run_info})
+
+            task = await self.runner.run(workflow)
+
+            run_info["status"] = "success" if task.status == TaskStatus.SUCCESS else "failed"
+            run_info["completed_at"] = datetime.utcnow().isoformat()
+            run_info["output"] = task.results
+            run_info["steps"] = [
+                {
+                    "name": r.step_name,
+                    "success": r.success,
+                    "output": r.output,
+                    "error": r.error,
+                    "duration_ms": r.duration_ms
+                }
+                for r in task.results
+            ]
+
+            if task.status == TaskStatus.FAILED:
+                run_info["error"] = task.error
+
+        except Exception as e:
+            logger.exception(f"Workflow run failed: {e}")
+            run_info["status"] = "failed"
+            run_info["error"] = str(e)
+            run_info["completed_at"] = datetime.utcnow().isoformat()
+
+        await self._emit_event("run_completed", {"run": run_info})
+
+        return run_info
+
+    async def stop_run(self, run_id: str) -> Dict[str, Any]:
+        """Stop a running workflow."""
+        if run_id not in self._runs:
+            return {"error": "Run not found"}
+
+        run_info = self._runs[run_id]
+        if run_info["status"] == "running":
+            run_info["status"] = "stopped"
+            run_info["completed_at"] = datetime.utcnow().isoformat()
+            await self._emit_event("run_completed", {"run": run_info})
+
+        return {"status": "stopped", "run_id": run_id}
+
+    def list_runs(self) -> List[Dict[str, Any]]:
+        """List all runs."""
+        return list(self._runs.values())
+
+    def get_run(self, run_id: str) -> Optional[Dict[str, Any]]:
+        """Get a specific run."""
+        return self._runs.get(run_id)

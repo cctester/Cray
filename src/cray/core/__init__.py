@@ -1,8 +1,8 @@
 """Core module - workflow engine, task management, and execution."""
 
-from cray.core.workflow import Workflow, Step
+from cray.core.workflow import Workflow, Step, WorkflowManager
 from cray.core.task import Task, TaskStatus
-from cray.core.runner import Runner
+from cray.core.runner import Runner, WorkflowRunner
 from cray.core.template import TemplateEngine, render
 from cray.core.dependency import (
     DependencyGraph,
@@ -34,9 +34,11 @@ from cray.core.metrics import (
 __all__ = [
     "Workflow",
     "Step",
+    "WorkflowManager",
     "Task",
     "TaskStatus",
     "Runner",
+    "WorkflowRunner",
     "TemplateEngine",
     "render",
     "DependencyGraph",

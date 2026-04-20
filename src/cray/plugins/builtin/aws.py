@@ -1,10 +1,16 @@
 """
 AWS plugin for Cray - provides AWS cloud services integration.
 """
-import boto3
 import asyncio
 from typing import Dict, Any
 from loguru import logger
+
+try:
+    import boto3
+    BOTO3_AVAILABLE = True
+except ImportError:
+    BOTO3_AVAILABLE = False
+    boto3 = None
 
 from cray.plugins import Plugin
 
@@ -29,30 +35,36 @@ class AWSPlugin(Plugin):
         self.sessions = {}
     
     async def execute(
-        self,
-        action: str,
-        params: Dict[str, Any],
-        context: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Execute an AWS action."""
-        
-        actions = {
-            "s3_upload": self._s3_upload,
-            "s3_download": self._s3_download,
-            "s3_list": self._s3_list,
-            "s3_delete": self._s3_delete,
-            "ec2_start": self._ec2_start,
-            "ec2_stop": self._ec2_stop,
-            "ec2_list": self._ec2_list,
-            "lambda_invoke": self._lambda_invoke,
-            "sqs_send": self._sqs_send,
-            "sqs_receive": self._sqs_receive,
-        }
-        
-        if action not in actions:
-            raise ValueError(f"Unknown action: {action}")
-        
-        return await actions[action](params)
+            self,
+            action: str,
+            params: Dict[str, Any],
+            context: Dict[str, Any]
+        ) -> Dict[str, Any]:
+            """Execute an AWS action."""
+
+            if not BOTO3_AVAILABLE:
+                return {
+                    "success": False,
+                    "error": "AWS plugin requires 'boto3' package. Install with: pip install boto3"
+                }
+
+            actions = {
+                "s3_upload": self._s3_upload,
+                "s3_download": self._s3_download,
+                "s3_list": self._s3_list,
+                "s3_delete": self._s3_delete,
+                "ec2_start": self._ec2_start,
+                "ec2_stop": self._ec2_stop,
+                "ec2_list": self._ec2_list,
+                "lambda_invoke": self._lambda_invoke,
+                "sqs_send": self._sqs_send,
+                "sqs_receive": self._sqs_receive,
+            }
+
+            if action not in actions:
+                raise ValueError(f"Unknown action: {action}")
+
+            return await actions[action](params)
     
     async def _s3_upload(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Upload a file to S3."""

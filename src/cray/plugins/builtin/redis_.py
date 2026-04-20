@@ -2,9 +2,15 @@
 Redis plugin for Cray - provides basic Redis operations.
 """
 
-import redis.asyncio as aioredis
 from typing import Dict, Any
 from loguru import logger
+
+try:
+    import redis.asyncio as aioredis
+    REDIS_AVAILABLE = True
+except ImportError:
+    REDIS_AVAILABLE = False
+    aioredis = None
 
 from cray.plugins import Plugin
 
@@ -32,6 +38,12 @@ class RedisPlugin(Plugin):
         context: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Execute a Redis action."""
+
+        if not REDIS_AVAILABLE:
+            return {
+                "success": False,
+                "error": "Redis plugin requires 'redis' package. Install with: pip install redis"
+            }
 
         actions = {
             "connect": self._connect,

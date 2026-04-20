@@ -1,128 +1,282 @@
+/**
+ * Workflow store with WebSocket real-time updates
+ */
+
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { wsService, type RunInfo, type WorkflowInfo } from '@/services/websocket'
+
+// API base URL
+const API_BASE = '/api'
 
 export interface Workflow {
   id: string
   name: string
   version: string
   description: string
-  file_path: string
-  steps: Step[]
-  updated_at: string
+  file_path?: string
+  steps: Array<{
+    name: string
+    plugin: string
+  }>
 }
 
-export interface Step {
-  name: string
-  plugin: string
-  action: string
-  params: Record<string, any>
-  depends_on?: string[]
-}
-
-export interface WorkflowRun {
+export interface Run {
   id: string
   workflow_id: string
-  workflow_name: string
   status: 'pending' | 'running' | 'success' | 'failed' | 'stopped'
   started_at: string
-  completed_at?: string
-  duration?: number
-  steps: RunStep[]
-  input?: Record<string, any>
-  output?: Record<string, any>
-}
-
-export interface RunStep {
-  name: string
-  status: 'pending' | 'running' | 'success' | 'failed' | 'skipped'
-  duration?: number
-  error?: string
-  output?: any
-  logs?: LogEntry[]
-}
-
-export interface LogEntry {
-  timestamp: string
-  level: 'debug' | 'info' | 'warning' | 'error'
-  message: string
-}
-
-export interface Plugin {
-  name: string
-  version: string
-  description: string
-  actions: PluginAction[]
-}
-
-export interface PluginAction {
-  name: string
-  description: string
-  params: PluginParam[]
-}
-
-export interface PluginParam {
-  name: string
-  type: string
-  required: boolean
-  default?: any
-  description: string
+  completed_at: string | null
+  input: Record<string, any>
+  output: any
+  error: string | null
+  steps: Array<{
+    name: string
+    success: boolean
+    output?: any
+    error?: string
+    duration_ms?: number
+  }>
 }
 
 export const useWorkflowStore = defineStore('workflow', () => {
+  // State
   const workflows = ref<Workflow[]>([])
-  const runs = ref<WorkflowRun[]>([])
-  const plugins = ref<Plugin[]>([])
+  const runs = ref<Run[]>([])
+  const currentWorkflow = ref<Workflow | null>(null)
+  const currentRun = ref<Run | null>(null)
   const loading = ref(false)
-  const connected = ref(false)
-  const ws = ref<WebSocket | null>(null)
+  const error = ref<string | null>(null)
+  const wsConnected = ref(false)
 
-  const runningWorkflows = computed(() => 
-    runs.value.filter(r => r.status === 'running')
-  )
-
-  const recentRuns = computed(() => 
-    [...runs.value]
-      .sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime())
-      .slice(0, 10)
-  )
-
+  // Computed
+  const workflowCount = computed(() => workflows.value.length)
+  const runningCount = computed(() => runs.value.filter(r => r.status === 'running').length)
   const successRate = computed(() => {
-    const completed = runs.value.filter(r => r.status !== 'running' && r.status !== 'pending')
+    const completed = runs.value.filter(r => r.status === 'success' || r.status === 'failed')
     if (completed.length === 0) return 0
-    const success = completed.filter(r => r.status === 'success').length
-    return Math.round((success / completed.length) * 100)
+    return Math.round((completed.filter(r => r.status === 'success').length / completed.length) * 100)
   })
 
+  // WebSocket subscriptions
+  let unsubscribers: Array<() => void> = []
+
+  // Initialize WebSocket listeners
+  function initWebSocket() {
+    // Subscribe to run events
+    unsubscribers.push(
+      wsService.onRunStarted((run) => {
+        const existingIndex = runs.value.findIndex(r => r.id === run.id)
+        if (existingIndex >= 0) {
+          runs.value[existingIndex] = run
+        } else {
+          runs.value.unshift(run)
+        }
+      })
+    )
+
+    unsubscribers.push(
+      wsService.onRunUpdated((run) => {
+        const index = runs.value.findIndex(r => r.id === run.id)
+        if (index >= 0) {
+          runs.value[index] = run
+        }
+      })
+    )
+
+    unsubscribers.push(
+      wsService.onRunCompleted((run) => {
+        const index = runs.value.findIndex(r => r.id === run.id)
+        if (index >= 0) {
+          runs.value[index] = run
+        }
+      })
+    )
+
+    unsubscribers.push(
+      wsService.onStepStarted((runId, step) => {
+        const run = runs.value.find(r => r.id === runId)
+        if (run) {
+          // Update step status if needed
+          console.log(`[Store] Step ${step} started for run ${runId}`)
+        }
+      })
+    )
+
+    unsubscribers.push(
+      wsService.onStepCompleted((runId, step, success, output) => {
+        const run = runs.value.find(r => r.id === runId)
+        if (run) {
+          const stepInfo = run.steps.find(s => s.name === step)
+          if (stepInfo) {
+            stepInfo.success = success
+            stepInfo.output = output
+          }
+        }
+      })
+    )
+
+    // Subscribe to workflow events
+    unsubscribers.push(
+      wsService.onWorkflowCreated((workflow) => {
+        const existing = workflows.value.find(w => w.id === workflow.id)
+        if (!existing) {
+          workflows.value.push({
+            id: workflow.id,
+            name: workflow.name,
+            version: workflow.version,
+            description: workflow.description,
+            steps: workflow.steps
+          })
+        }
+      })
+    )
+
+    unsubscribers.push(
+      wsService.onWorkflowUpdated((workflow) => {
+        const index = workflows.value.findIndex(w => w.id === workflow.id)
+        if (index >= 0) {
+          workflows.value[index] = {
+            ...workflows.value[index],
+            name: workflow.name,
+            version: workflow.version,
+            description: workflow.description,
+            steps: workflow.steps
+          }
+        }
+      })
+    )
+
+    wsConnected.value = true
+  }
+
+  // Cleanup WebSocket listeners
+  function cleanupWebSocket() {
+    unsubscribers.forEach(unsub => unsub())
+    unsubscribers = []
+    wsConnected.value = false
+  }
+
+  // Actions
   async function fetchWorkflows() {
+    loading.value = true
+    error.value = null
+
     try {
-      const response = await fetch('/api/workflows')
-      if (response.ok) {
-        workflows.value = await response.json()
-      }
+      const response = await fetch(`${API_BASE}/workflows`)
+      if (!response.ok) throw new Error('Failed to fetch workflows')
+      workflows.value = await response.json()
     } catch (e) {
-      console.error('Failed to fetch workflows:', e)
+      error.value = e instanceof Error ? e.message : 'Unknown error'
+    } finally {
+      loading.value = false
     }
   }
 
   async function fetchRuns() {
+    loading.value = true
+    error.value = null
+
     try {
-      const response = await fetch('/api/runs')
-      if (response.ok) {
-        runs.value = await response.json()
-      }
+      const response = await fetch(`${API_BASE}/runs`)
+      if (!response.ok) throw new Error('Failed to fetch runs')
+      runs.value = await response.json()
     } catch (e) {
-      console.error('Failed to fetch runs:', e)
+      error.value = e instanceof Error ? e.message : 'Unknown error'
+    } finally {
+      loading.value = false
     }
   }
 
-  async function fetchPlugins() {
+  async function fetchWorkflow(id: string) {
+    loading.value = true
+    error.value = null
+
     try {
-      const response = await fetch('/api/plugins')
-      if (response.ok) {
-        plugins.value = await response.json()
-      }
+      const response = await fetch(`${API_BASE}/workflows/${id}`)
+      if (!response.ok) throw new Error('Workflow not found')
+      currentWorkflow.value = await response.json()
     } catch (e) {
-      console.error('Failed to fetch plugins:', e)
+      error.value = e instanceof Error ? e.message : 'Unknown error'
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function fetchRun(id: string) {
+    loading.value = true
+    error.value = null
+
+    try {
+      const response = await fetch(`${API_BASE}/runs/${id}`)
+      if (!response.ok) throw new Error('Run not found')
+      currentRun.value = await response.json()
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : 'Unknown error'
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function createWorkflow(workflow: Partial<Workflow>) {
+    loading.value = true
+    error.value = null
+
+    try {
+      const response = await fetch(`${API_BASE}/workflows`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(workflow)
+      })
+      if (!response.ok) throw new Error('Failed to create workflow')
+      const created = await response.json()
+      // WebSocket will handle the update
+      return created
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : 'Unknown error'
+      throw e
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function updateWorkflow(id: string, workflow: Partial<Workflow>) {
+    loading.value = true
+    error.value = null
+
+    try {
+      const response = await fetch(`${API_BASE}/workflows/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(workflow)
+      })
+      if (!response.ok) throw new Error('Failed to update workflow')
+      const updated = await response.json()
+      // WebSocket will handle the update
+      return updated
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : 'Unknown error'
+      throw e
+    } finally {
+      loading.value = false
+    }
+  }
+
+  async function deleteWorkflow(id: string) {
+    loading.value = true
+    error.value = null
+
+    try {
+      const response = await fetch(`${API_BASE}/workflows/${id}`, {
+        method: 'DELETE'
+      })
+      if (!response.ok) throw new Error('Failed to delete workflow')
+      workflows.value = workflows.value.filter(w => w.id !== id)
+    } catch (e) {
+      error.value = e instanceof Error ? e.message : 'Unknown error'
+      throw e
+    } finally {
+      loading.value = false
     }
   }
 
@@ -153,119 +307,71 @@ export const useWorkflowStore = defineStore('workflow', () => {
   }
 
   async function runWorkflow(workflowId: string, input?: Record<string, any>) {
+    loading.value = true
+    error.value = null
+
     try {
-      const response = await fetch('/api/runs', {
+      const response = await fetch(`${API_BASE}/runs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ workflow_id: workflowId, input })
+        body: JSON.stringify({ workflow_id: workflowId, input: input || {} })
       })
-      if (response.ok) {
-        const run = await response.json()
-        runs.value.unshift(run)
-        return run
-      }
+      if (!response.ok) throw new Error('Failed to start workflow')
+      const run = await response.json()
+      // WebSocket will handle the update
+      return run
     } catch (e) {
-      console.error('Failed to run workflow:', e)
+      error.value = e instanceof Error ? e.message : 'Unknown error'
+      throw e
+    } finally {
+      loading.value = false
     }
   }
 
   async function stopRun(runId: string) {
+    loading.value = true
+    error.value = null
+
     try {
-      const response = await fetch(`/api/runs/${runId}/stop`, {
+      const response = await fetch(`${API_BASE}/runs/${runId}/stop`, {
         method: 'POST'
       })
-      if (response.ok) {
-        await fetchRuns()
-      }
+      if (!response.ok) throw new Error('Failed to stop run')
+      // WebSocket will handle the update
     } catch (e) {
-      console.error('Failed to stop run:', e)
-    }
-  }
-
-  function connectWebSocket() {
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const wsUrl = `${protocol}//${window.location.host}/ws`
-    
-    ws.value = new WebSocket(wsUrl)
-    
-    ws.value.onopen = () => {
-      connected.value = true
-      console.log('WebSocket connected')
-    }
-    
-    ws.value.onclose = () => {
-      connected.value = false
-      console.log('WebSocket disconnected')
-      // Reconnect after 5 seconds
-      setTimeout(connectWebSocket, 5000)
-    }
-    
-    ws.value.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data)
-        handleWebSocketMessage(data)
-      } catch (e) {
-        console.error('Failed to parse WebSocket message:', e)
-      }
-    }
-    
-    ws.value.onerror = (error) => {
-      console.error('WebSocket error:', error)
-    }
-  }
-
-  function handleWebSocketMessage(data: any) {
-    switch (data.type) {
-      case 'run_started':
-      case 'run_updated':
-        updateRun(data.run)
-        break
-      case 'run_completed':
-        updateRun(data.run)
-        break
-      case 'workflow_created':
-        workflows.value.push(data.workflow)
-        break
-      case 'workflow_updated':
-        const idx = workflows.value.findIndex(w => w.id === data.workflow.id)
-        if (idx !== -1) {
-          workflows.value[idx] = data.workflow
-        }
-        break
-    }
-  }
-
-  function updateRun(run: WorkflowRun) {
-    const idx = runs.value.findIndex(r => r.id === run.id)
-    if (idx !== -1) {
-      runs.value[idx] = run
-    } else {
-      runs.value.unshift(run)
-    }
-  }
-
-  function disconnectWebSocket() {
-    if (ws.value) {
-      ws.value.close()
-      ws.value = null
+      error.value = e instanceof Error ? e.message : 'Unknown error'
+      throw e
+    } finally {
+      loading.value = false
     }
   }
 
   return {
+    // State
     workflows,
     runs,
-    plugins,
+    currentWorkflow,
+    currentRun,
     loading,
-    connected,
-    runningWorkflows,
-    recentRuns,
+    error,
+    wsConnected,
+
+    // Computed
+    workflowCount,
+    runningCount,
     successRate,
+
+    // Actions
+    initWebSocket,
+    cleanupWebSocket,
     fetchWorkflows,
     fetchRuns,
-    fetchPlugins,
+    fetchWorkflow,
+    fetchRun,
+    createWorkflow,
+    updateWorkflow,
+    deleteWorkflow,
     runWorkflow,
-    stopRun,
-    connectWebSocket,
-    disconnectWebSocket,
+    stopRun
   }
 })

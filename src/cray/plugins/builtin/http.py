@@ -12,10 +12,10 @@ from cray.plugins import Plugin
 
 class HttpPlugin(Plugin):
     """Plugin for making HTTP requests."""
-    
+
     name = "http"
     description = "Make HTTP requests"
-    
+
     @property
     def actions(self):
         return {
@@ -24,15 +24,15 @@ class HttpPlugin(Plugin):
             "put": {"description": "Make PUT request", "params": [{"name": "url", "type": "string", "required": True, "description": "URL to request"}, {"name": "body", "type": "string", "required": False, "description": "Request body"}]},
             "delete": {"description": "Make DELETE request", "params": [{"name": "url", "type": "string", "required": True, "description": "URL to request"}]},
         }
-    
+
     async def execute(
-        self, 
-        action: str, 
+        self,
+        action: str,
         params: Dict[str, Any],
         context: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Execute an HTTP action."""
-        
+
         if action == "get":
             return await self._request("GET", params)
         elif action == "post":
@@ -46,21 +46,21 @@ class HttpPlugin(Plugin):
             return await self._request(method, params)
         else:
             raise ValueError(f"Unknown action: {action}")
-    
+
     async def _request(
-        self, 
-        method: str, 
+        self,
+        method: str,
         params: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Make an HTTP request."""
-        
+
         url = params.get("url")
         if not url:
             raise ValueError("Missing required parameter: url")
-        
+
         headers = params.get("headers", {})
         timeout = params.get("timeout", 30)
-        
+
         # Prepare body
         body = None
         if "json" in params:
@@ -68,14 +68,14 @@ class HttpPlugin(Plugin):
             headers["Content-Type"] = "application/json"
         elif "body" in params:
             body = params["body"].encode() if isinstance(params["body"], str) else params["body"]
-        
+
         logger.debug(f"HTTP {method} {url}")
-        
+
         try:
             # Use aiohttp if available, otherwise fall back to urllib
             try:
                 import aiohttp
-                
+
                 async with aiohttp.ClientSession() as session:
                     async with session.request(
                         method=method,
@@ -85,13 +85,13 @@ class HttpPlugin(Plugin):
                         timeout=aiohttp.ClientTimeout(total=timeout)
                     ) as response:
                         response_text = await response.text()
-                        
+
                         # Try to parse JSON
                         try:
                             response_data = await response.json()
-                        except:
+                        except (json.JSONDecodeError, aiohttp.ContentTypeError):
                             response_data = response_text
-                        
+
                         return {
                             "url": url,
                             "method": method,
@@ -100,17 +100,17 @@ class HttpPlugin(Plugin):
                             "body": response_data,
                             "success": 200 <= response.status < 300
                         }
-                        
+
             except ImportError:
                 # Fallback to urllib (sync, run in executor)
                 import urllib.request
                 import urllib.error
-                
+
                 def sync_request():
                     req = urllib.request.Request(url, method=method)
                     for key, value in headers.items():
                         req.add_header(key, value)
-                    
+
                     try:
                         with urllib.request.urlopen(req, body, timeout=timeout) as response:
                             return {
@@ -130,10 +130,10 @@ class HttpPlugin(Plugin):
                             "body": e.read().decode(),
                             "success": False
                         }
-                
+
                 loop = asyncio.get_event_loop()
                 return await loop.run_in_executor(None, sync_request)
-                
+
         except asyncio.TimeoutError:
             return {
                 "url": url,

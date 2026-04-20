@@ -528,10 +528,10 @@ def create_app(workflows_dir: str = None) -> FastAPI:
     async def broadcast(message: dict):
         """Broadcast message to all WebSocket clients."""
         for client in websocket_clients:
-            try:
-                await client.send_json(message)
-            except Exception:
-                pass
+                try:
+                    await client.send_json(message)
+                except Exception as e:
+                    logger.debug(f"Failed to send to WebSocket client: {e}")
     
     async def run_workflow_task(run_id: str, workflow_path: str, input_data: dict, workflow_name: str):
         """Run workflow in background."""

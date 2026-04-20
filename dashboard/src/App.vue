@@ -1,8 +1,13 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { onMounted, onUnmounted } from 'vue'
 import Sidebar from './components/Sidebar.vue'
+import { wsService } from './services/websocket'
+import { useWorkflowStore } from './stores/workflow'
 
-onMounted(() => {
+const store = useWorkflowStore()
+
+onMounted(async () => {
+  // Apply theme from settings
   const stored = localStorage.getItem('cray-settings')
   if (stored) {
     const settings = JSON.parse(stored)
@@ -10,6 +15,23 @@ onMounted(() => {
   } else {
     document.documentElement.setAttribute('data-theme', 'dark')
   }
+
+  // Connect WebSocket on app mount
+  if (!wsService.isConnected()) {
+    try {
+      await wsService.connect()
+      store.initWebSocket()
+      console.log('[App] WebSocket connected')
+    } catch (e) {
+      console.error('[App] WebSocket connection failed:', e)
+    }
+  }
+})
+
+onUnmounted(() => {
+  // Cleanup on app unmount
+  store.cleanupWebSocket()
+  wsService.disconnect()
 })
 </script>
 

@@ -153,6 +153,10 @@ class SecretsManager:
             }
             for name, meta in self._metadata.items()
         }
+        # Ensure directory exists for ENV backend
+        if not self.storage_path.exists():
+            self.storage_path.mkdir(parents=True, exist_ok=True)
+            self.storage_path.chmod(0o700)
         meta_file.write_text(json.dumps(data, indent=2))
         meta_file.chmod(0o600)
     
@@ -375,6 +379,5 @@ def get_secret(name: str, default: Optional[str] = None) -> Optional[str]:
 
 
 def set_secret(name: str, value: str, tags: Optional[List[str]] = None) -> None:
-    pass
     """Convenience function to set a secret."""
     get_secrets_manager().set(name, value, tags)
