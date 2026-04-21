@@ -330,7 +330,9 @@ async def save_workflow_version(workflow_id: str, request: dict):
 @app.post("/api/workflows/{workflow_id}/rollback/{version_id}")
 async def rollback_workflow(workflow_id: str, version_id: str):
     """Rollback workflow to a specific version."""
+    logger.info(f"Rolling back {workflow_id} to version {version_id}")
     success = version_manager.rollback(workflow_id, version_id)
+    logger.info(f"Rollback result: {success}")
     return {"success": success, "workflow_id": workflow_id, "version_id": version_id}
 
 

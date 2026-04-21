@@ -259,7 +259,9 @@ class WorkflowVersionManager:
         Returns:
             True if rollback successful
         """
+        logger.info(f"Rollback called: {workflow_name} -> {version_id}")
         version = self.get_version(workflow_name, version_id)
+        logger.info(f"Found version: {version}")
         if not version:
             logger.error(f"Version {version_id} not found")
             return False

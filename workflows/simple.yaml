@@ -1,18 +1,17 @@
 id: simple
-name: simple
+name: simple test
 version: "1.2"
 description: ""
 file_path: /home/cc/Documents/Cray/workflows/simple.yaml
 steps:
-  - name: step1
+  - name: step-1
     plugin: shell
     action: exec
     params:
       command: echo "Hello"
 
-  - name: newstep
+  - name: new-step
     plugin: shell
     action: exec
     params:
       command: echo "2nd step"
-    condition: "{{ steps.step1.success }}"
