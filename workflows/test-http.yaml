@@ -1,0 +1,16 @@
+name: test-http
+description: null
+version: "1.0"
+steps:
+  - name: fetch
+    plugin: http
+    action: get
+    params:
+      url: https://httpbin.org/get
+  - name: process
+    plugin: file
+    action: write
+    params:
+      path: ./output.json
+      content: "{{ steps.fetch.body }}"
+    condition: "{{ steps.fetch.success }}"

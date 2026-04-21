@@ -119,6 +119,18 @@ class EventBroadcaster:
     def __init__(self, connection_manager: ConnectionManager):
         self.manager = connection_manager
 
+    async def __call__(self, event_type: str, data: Dict[str, Any]):
+        """Handle events from runner."""
+        run = data.get("run", {})
+        run_id = run.get("id")
+        
+        if event_type == "run_started":
+            await self.on_run_started(run)
+        elif event_type == "run_updated":
+            await self.on_run_updated(run)
+        elif event_type == "run_completed":
+            await self.on_run_completed(run)
+
     async def on_run_started(self, run: dict):
         """Called when a run starts."""
         await self.manager.broadcast({

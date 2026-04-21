@@ -258,12 +258,23 @@ def build_step_dependency_graph(steps: List[Any]) -> DependencyGraph:
     Returns:
         DependencyGraph for the steps
     """
+    import re
     graph = DependencyGraph()
 
     for step in steps:
         depends_on = getattr(step, 'depends_on', []) or []
         if isinstance(depends_on, str):
             depends_on = [depends_on]
+        
+        # Add implicit dependencies from condition references
+        condition = getattr(step, 'condition', None)
+        if condition:
+            cond_pattern = r"\{\{\s*steps\.([\w\-]+)\.\w+\s*\}\}"
+            cond_deps = re.findall(cond_pattern, condition)
+            for dep in cond_deps:
+                if dep not in depends_on:
+                    depends_on.append(dep)
+        
         graph.add_node(step.name, depends_on)
 
     return graph

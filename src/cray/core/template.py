@@ -156,7 +156,7 @@ class TemplateEngine:
         if expr == 'input':
             return context.get('input', {})
         
-        # Step outputs
+        # Step outputs - context stores {success, output, error} per step
         if expr.startswith('steps.'):
             parts = expr[6:].split('.', 1)  # Remove 'steps.'
             step_name = parts[0]
@@ -165,7 +165,14 @@ class TemplateEngine:
             step_data = context.get('steps', {}).get(step_name, {})
             
             if field:
-                return self._get_nested(step_data, field)
+                # Check special fields first
+                if field in ("success", "output", "error"):
+                    return step_data.get(field)
+                # Otherwise look in step's output
+                output = step_data.get("output", {})
+                if isinstance(output, dict):
+                    return output.get(field)
+                return self._get_nested(output, field)
             return step_data
         
         # Environment variables

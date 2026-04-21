@@ -4,14 +4,15 @@ version: "1.2"
 description: ""
 file_path: /home/cc/Documents/Cray/workflows/simple.yaml
 steps:
-  - name: step-1
+  - name: step1
     plugin: shell
     action: exec
     params:
       command: echo "Hello"
 
-  - name: new-step
+  - name: newstep
     plugin: shell
     action: exec
     params:
       command: echo "2nd step"
+    condition: "{{ steps.step1.success }}"

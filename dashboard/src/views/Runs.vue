@@ -136,7 +136,7 @@ async function stopRun(id: string) {
         
         <div class="run-info">
           <h3 class="run-workflow">{{ run.workflow_name }}</h3>
-          <p class="run-id">{{ run.id.slice(0, 8) }}</p>
+          <p class="run-id">{{ run.workflow_name }} ({{ run.id.slice(0, 8) }})</p>
         </div>
         
         <div class="run-timing">

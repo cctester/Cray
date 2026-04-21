@@ -119,7 +119,11 @@ class Runner:
 
             result = await self._execute_step_with_retry(step, context, dep_graph)
             task.add_result(result)
-            context["steps"][step_name] = result.output or {}
+            context["steps"][step_name] = {
+                "success": result.success,
+                "output": result.output or {},
+                "error": result.error
+            }
 
             if not result.success:
                 # Execute step-level on_error handler
@@ -182,7 +186,11 @@ class Runner:
 
                 step_name, result = item
                 task.add_result(result)
-                context["steps"][step_name] = result.output or {}
+                context["steps"][step_name] = {
+                    "success": result.success,
+                    "output": result.output or {},
+                    "error": result.error
+                }
                 completed.add(step_name)
 
                 if result.success:
@@ -232,7 +240,11 @@ class Runner:
             output={"skipped": True, "reason": reason}
         )
         task.add_result(result)
-        context["steps"][step_name] = result.output or {}
+        context["steps"][step_name] = {
+            "success": result.success,
+            "output": result.output or {},
+            "error": result.error
+        }
         dep_graph.mark_skipped(step_name, reason)
 
     async def _execute_step_with_retry(
@@ -291,7 +303,8 @@ class Runner:
             # Render templates in condition
             if step.condition:
                 rendered_condition = render(step.condition, context, dict(os.environ))
-                if not self._evaluate_condition(rendered_condition, context):
+                logger.debug(context)
+                if rendered_condition is None or not self._evaluate_condition(rendered_condition, context):
                     logger.info(f"Step '{step.name}' skipped (condition not met)")
                     return TaskResult(
                         step_name=step.name,
@@ -301,7 +314,7 @@ class Runner:
 
             # Render templates in params
             rendered_params = render(step.params, context, dict(os.environ))
-            logger.debug(f"Rendered params for '{step.name}': {rendered_params}")
+            #logger.debug(f"Rendered params for '{step.name}': {rendered_params}")
 
             # Execute action with timeout
             output = await asyncio.wait_for(
@@ -332,37 +345,31 @@ class Runner:
             )
 
     def _evaluate_condition(
-        self,
-        condition: str,
-        context: Dict[str, Any]
-    ) -> bool:
-        """Evaluate a condition expression."""
-        # Simple template evaluation
-        # Supports: {{ steps.step_name.success }}, {{ steps.step_name.output.field }}
-
-        try:
-            # Replace template variables
-            expr = condition.strip()
-
-            # Handle common patterns
-            if "{{ steps." in expr:
-                import re
-                pattern = r"\{\{\s*steps\.(\w+)\.(\w+)\s*\}\}"
-
-                def replace(match):
-                    step_name = match.group(1)
-                    field = match.group(2)
-                    step_result = context.get("steps", {}).get(step_name, {})
-                    return str(step_result.get(field, False))
-
-                expr = re.sub(pattern, replace, expr)
-
-            # Evaluate as boolean
-            return bool(eval(expr))
-
-        except Exception as e:
-            logger.warning(f"Condition evaluation failed: {e}")
-            return False
+            self,
+            condition: str,
+            context: Dict[str, Any]
+        ) -> bool:
+            """Evaluate a condition expression."""
+            if condition is None:
+                return False
+            if isinstance(condition, bool):
+                return condition
+            
+            try:
+                expr = condition.strip()
+                if "{{ steps." in expr:
+                    import re
+                    pattern = r"\{\{\s*steps\.([\w\-]+)\.(\w+)\s*\}\}"
+                    def replace(match):
+                        step_name = match.group(1)
+                        field = match.group(2)
+                        step_result = context.get("steps", {}).get(step_name, {})
+                        return str(step_result.get(field, False))
+                    expr = re.sub(pattern, replace, expr)
+                return bool(eval(expr))
+            except Exception as e:
+                logger.warning(f"Condition evaluation failed: {e}")
+                return False
 
     async def _execute_callbacks(
         self,
@@ -495,6 +502,7 @@ class WorkflowRunner:
         run_info = {
             "id": run_id,
             "workflow_id": workflow_id,
+            "workflow_name": workflow_id,
             "status": "pending",
             "started_at": datetime.utcnow().isoformat(),
             "completed_at": None,
@@ -512,17 +520,13 @@ class WorkflowRunner:
         await self._emit_event("run_started", {"run": run_info})
 
         try:
-            # Load workflow (placeholder - actual implementation would load from storage)
+            # Load workflow from yaml file
             workflow_path = Path(f"workflows/{workflow_id}.yaml")
             if workflow_path.exists():
                 workflow = Workflow.from_yaml(workflow_path)
-            else:
-                # Create a simple workflow for testing
-                workflow = Workflow(
-                    name=workflow_id,
-                    version="1.0",
-                    steps=[]
-                )
+                run_info["workflow_name"] = workflow.name
+
+            # Update status
 
             # Update status
             run_info["status"] = "running"
@@ -534,7 +538,7 @@ class WorkflowRunner:
             # Update run info with results
             run_info["status"] = "success" if task.status == TaskStatus.SUCCESS else "failed"
             run_info["completed_at"] = datetime.utcnow().isoformat()
-            run_info["output"] = task.results
+            run_info["output"] = [r.dict() for r in task.results]
             run_info["steps"] = [
                 {
                     "name": r.step_name,
@@ -596,7 +600,7 @@ class WorkflowRunner:
 
             run_info["status"] = "success" if task.status == TaskStatus.SUCCESS else "failed"
             run_info["completed_at"] = datetime.utcnow().isoformat()
-            run_info["output"] = task.results
+            run_info["output"] = [r.dict() for r in task.results]
             run_info["steps"] = [
                 {
                     "name": r.step_name,

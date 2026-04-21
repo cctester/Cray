@@ -264,20 +264,24 @@ class WorkflowVersionManager:
             logger.error(f"Version {version_id} not found")
             return False
         
-        # Write workflow file
-        workflow_file = Path(workflows_dir) / f"{workflow_name}.yaml"
-        workflow_file.write_text(version.content)
-        
-        # Save as new version (rollback)
-        self.save_version(
-            workflow_name,
-            version.content,
-            message=f"Rollback to {version_id}",
-            tags=["rollback"]
-        )
-        
-        logger.info(f"Rolled back '{workflow_name}' to {version_id}")
-        return True
+        try:
+            workflows_path = Path(workflows_dir or "./workflows")
+            workflows_path.mkdir(parents=True, exist_ok=True)
+            workflow_file = workflows_path / f"{workflow_name}.yaml"
+            workflow_file.write_text(version.content)
+            
+            self.save_version(
+                workflow_name,
+                version.content,
+                message=f"Rollback to {version_id}",
+                tags=["rollback"]
+            )
+            
+            logger.info(f"Rolled back '{workflow_name}' to {version_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Rollback failed: {e}")
+            return False
     
     def diff(
         self,
