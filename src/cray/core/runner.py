@@ -150,6 +150,8 @@ class Runner:
         completed: Set[str] = set()
         failed_steps: Set[str] = set()
         semaphore = asyncio.Semaphore(workflow.max_parallel)
+        # Lock to protect shared state mutations from concurrent coroutines
+        state_lock = asyncio.Lock()
 
         async def run_step_with_semaphore(step_name: str) -> tuple:
             async with semaphore:
@@ -179,36 +181,37 @@ class Runner:
             tasks = [run_step_with_semaphore(name) for name in ready]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
-            for item in results:
-                if isinstance(item, Exception):
-                    logger.error(f"Step execution error: {item}")
-                    continue
+            async with state_lock:
+                for item in results:
+                    if isinstance(item, Exception):
+                        logger.error(f"Step execution error: {item}")
+                        continue
 
-                step_name, result = item
-                task.add_result(result)
-                context["steps"][step_name] = {
-                    "success": result.success,
-                    "output": result.output or {},
-                    "error": result.error
-                }
-                completed.add(step_name)
+            step_name, result = item
+            task.add_result(result)
+            context["steps"][step_name] = {
+                "success": result.success,
+                "output": result.output or {},
+                "error": result.error
+            }
+            completed.add(step_name)
 
-                if result.success:
-                    dep_graph.mark_success(step_name, result.output)
-                else:
-                    dep_graph.mark_failed(step_name, result.error)
-                    failed_steps.add(step_name)
+                    if result.success:
+                        dep_graph.mark_success(step_name, result.output)
+                    else:
+                        dep_graph.mark_failed(step_name, result.error)
+                        failed_steps.add(step_name)
 
-                    # Execute step-level on_error handler
-                    step = step_map[step_name]
-                    if step.on_error:
-                        await self._execute_step_error_handler(step, result, context)
+                        # Execute step-level on_error handler
+                        step = step_map[step_name]
+                        if step.on_error:
+                            await self._execute_step_error_handler(step, result, context)
 
-                    if not step.continue_on_error:
-                        # Execute workflow-level on_error handlers
-                        await self._execute_callbacks(workflow.on_error, context)
-                        task.fail(f"Step '{step_name}' failed: {result.error}")
-                        return
+                        if not step.continue_on_error:
+                            # Execute workflow-level on_error handlers
+                            await self._execute_callbacks(workflow.on_error, context)
+                            task.fail(f"Step '{step_name}' failed: {result.error}")
+                            return
 
     def _check_failed_dependencies(
         self,
@@ -345,31 +348,43 @@ class Runner:
             )
 
     def _evaluate_condition(
-            self,
-            condition: str,
-            context: Dict[str, Any]
-        ) -> bool:
-            """Evaluate a condition expression."""
-            if condition is None:
-                return False
-            if isinstance(condition, bool):
-                return condition
-            
-            try:
-                expr = condition.strip()
-                if "{{ steps." in expr:
-                    import re
-                    pattern = r"\{\{\s*steps\.([\w\-]+)\.(\w+)\s*\}\}"
-                    def replace(match):
-                        step_name = match.group(1)
-                        field = match.group(2)
-                        step_result = context.get("steps", {}).get(step_name, {})
-                        return str(step_result.get(field, False))
-                    expr = re.sub(pattern, replace, expr)
-                return bool(eval(expr))
-            except Exception as e:
-                logger.warning(f"Condition evaluation failed: {e}")
-                return False
+        self,
+        condition: str,
+        context: Dict[str, Any]
+    ) -> bool:
+        """Evaluate a condition expression safely.
+
+        Supports: {{ steps.step_name.success }}, {{ steps.step_name.output.field }}
+        Uses a restricted eval with no builtins to prevent code injection.
+        """
+        if condition is None:
+            return False
+        if isinstance(condition, bool):
+            return condition
+
+        try:
+            expr = condition.strip()
+
+            if "{{ steps." in expr:
+                import re
+                pattern = r"\{\{\s*steps\.([\w\-]+)\.(\w+)\s*\}\}"
+
+                def replace(match):
+                    step_name = match.group(1)
+                    field = match.group(2)
+                    step_result = context.get("steps", {}).get(step_name, {})
+                    return str(step_result.get(field, False))
+
+                expr = re.sub(pattern, replace, expr)
+
+            # Evaluate as boolean — use restricted globals for safety
+            allowed_names = {"True": True, "False": False, "None": None,
+                             "true": True, "false": False, "null": None}
+            return bool(eval(expr, {"__builtins__": {}}, allowed_names))
+
+        except Exception as e:
+            logger.warning(f"Condition evaluation failed: {e}")
+            return False
 
     async def _execute_callbacks(
         self,

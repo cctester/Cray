@@ -15,7 +15,7 @@ import threading
 from typing import Dict, Any, Optional, List, Callable
 from datetime import datetime, timedelta
 from dataclasses import dataclass, field
-from collections import defaultdict
+from collections import defaultdict, deque
 from contextlib import contextmanager
 from loguru import logger
 
@@ -92,9 +92,8 @@ class MetricsCollector:
         self._workflows: Dict[str, WorkflowMetrics] = {}
         self._counters: Dict[str, float] = defaultdict(float)
         self._gauges: Dict[str, float] = {}
-        _histograms: Dict[str, List[float]] = defaultdict(list)
-        self._histograms = _histograms
-        self._lock = threading.Lock()
+        self._histograms: Dict[str, deque] = defaultdict(lambda: deque(maxlen=1000))
+        self._lock = threading.RLock()
         self._start_time = time.time()
         
         # Start cleanup task
@@ -106,12 +105,12 @@ class MetricsCollector:
             while True:
                 await asyncio.sleep(3600)  # Run every hour
                 self._cleanup_old_metrics()
-        
+
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             self._cleanup_task = loop.create_task(cleanup_loop())
         except RuntimeError:
-            pass
+            logger.warning("No running event loop — metrics cleanup task not started")
     
     def _cleanup_old_metrics(self) -> None:
         """Remove metrics older than retention period."""
@@ -199,9 +198,6 @@ class MetricsCollector:
         key = self._make_key(name, labels)
         with self._lock:
             self._histograms[key].append(value)
-            # Keep last 1000 values
-            if len(self._histograms[key]) > 1000:
-                self._histograms[key] = self._histograms[key][-1000:]
     
     def _make_key(self, name: str, labels: Optional[Dict[str, str]] = None) -> str:
         """Create a unique key for a metric."""
@@ -287,12 +283,16 @@ class MetricsCollector:
         for key, value in counters.items():
             if "cray_workflow_total" in key:
                 total_runs += value
-                if 'status="success"' in key:
-                    successful += value
-                elif 'status="failed"' in key:
-                    failed += value
-                elif 'status="running"' in key:
-                    running += value
+                # Parse labels from key instead of fragile string matching
+                # Key format: cray_workflow_total{label1="val1",label2="val2"}
+                if "success" in key.split("{", 1)[-1].split("}")[0].split(","):
+                    for part in key.split("{", 1)[-1].split("}")[0].split(","):
+                        if "status" in part and "success" in part:
+                            successful += value
+                        elif "status" in part and "failed" in part:
+                            failed += value
+                        elif "status" in part and "running" in part:
+                            running += value
         
         # Fallback to workflow dict if no counters
         if total_runs == 0:
@@ -346,7 +346,12 @@ class MetricsCollector:
                 sorted_values = sorted(values)
                 count = len(sorted_values)
                 sum_val = sum(sorted_values)
-                
+
+                # Prometheus histogram buckets
+                bucket_bounds = [0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]
+                for bound in bucket_bounds:
+                    bucket_count = sum(1 for v in sorted_values if v <= bound)
+                    lines.append(f"{key}_bucket{{le=\"{bound}\"}} {bucket_count}")
                 lines.append(f"{key}_bucket{{le=\"+Inf\"}} {count}")
                 lines.append(f"{key}_sum {sum_val}")
                 lines.append(f"{key}_count {count}")
@@ -368,7 +373,12 @@ class MetricsCollector:
                 sorted_values = sorted(values)
                 count = len(sorted_values)
                 sum_val = sum(sorted_values)
-                
+
+                # Prometheus histogram buckets
+                bucket_bounds = [0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0]
+                for bound in bucket_bounds:
+                    bucket_count = sum(1 for v in sorted_values if v <= bound)
+                    lines.append(f"{key}_bucket{{le=\"{bound}\"}} {bucket_count}")
                 lines.append(f"{key}_bucket{{le=\"+Inf\"}} {count}")
                 lines.append(f"{key}_sum {sum_val}")
                 lines.append(f"{key}_count {count}")

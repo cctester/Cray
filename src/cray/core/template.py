@@ -13,7 +13,7 @@ from loguru import logger
 class TemplateEngine:
     """
     Template engine for resolving variables in workflow parameters.
-    
+
     Supports:
     - {{ input.key }} - Access workflow input
     - {{ steps.step_name.field }} - Access previous step outputs
@@ -21,13 +21,24 @@ class TemplateEngine:
     - {{ now }} - Current timestamp
     - {{ today }} - Today's date
     - Filters: | default('value'), | upper, | lower, | trim
+
+    Config:
+    - max_depth: Maximum recursion depth for nested templates (default: 10)
+    - strict: If True, raise on missing keys instead of returning None (default: False)
     """
-    
+
     # Pattern to match {{ expression }}
     TEMPLATE_PATTERN = re.compile(r'\{\{\s*(.+?)\s*\}\}')
-    
-    def __init__(self):
-        """Initialize the template engine."""
+
+    def __init__(self, max_depth: int = 10, strict: bool = False):
+        """Initialize the template engine.
+
+        Args:
+            max_depth: Maximum recursion depth for nested templates
+            strict: If True, raise KeyError on missing variables
+        """
+        self._max_depth = max_depth
+        self._strict = strict
         self._filters = {
             'default': lambda val, default='': val if val is not None else default,
             'upper': lambda val: str(val).upper(),
@@ -73,24 +84,47 @@ class TemplateEngine:
             return template
     
     def _render_string(
-        self,
-        template: str,
-        context: Dict[str, Any],
-        env: Optional[Dict[str, str]] = None
+        self, template: str, context: Dict[str, Any], env: Optional[Dict[str, str]] = None,
+        _depth: int = 0
     ) -> Any:
-        """Render a string template."""
+        """Render a string template.
+
+        Args:
+            template: Template string
+            context: Workflow context
+            env: Environment variables
+            _depth: Current recursion depth (internal)
+        """
+        if _depth > self._max_depth:
+            raise RecursionError(
+                f"Template recursion depth exceeded ({self._max_depth}). "
+                f"Check for self-referencing variables."
+            )
+
         # Check if the entire string is a single template
         match = self.TEMPLATE_PATTERN.fullmatch(template)
         if match:
             # Single expression - return the actual value (not string)
-            return self._evaluate_expression(match.group(1), context, env)
-        
+            result = self._evaluate_expression(match.group(1), context, env)
+            # If result is a string containing templates, recurse
+            if isinstance(result, str) and self.TEMPLATE_PATTERN.search(result):
+                return self._render_string(result, context, env, _depth + 1)
+            return result
+
         # Multiple or partial templates - string substitution
         def replace(match):
             result = self._evaluate_expression(match.group(1), context, env)
-            return str(result) if result is not None else ''
-        
-        return self.TEMPLATE_PATTERN.sub(replace, template)
+            if result is None:
+                if self._strict:
+                    raise KeyError(f"Template variable not found: {match.group(1)}")
+                return ''
+            return str(result)
+
+        rendered = self.TEMPLATE_PATTERN.sub(replace, template)
+        # Check if substitution introduced new templates (nested resolution)
+        if self.TEMPLATE_PATTERN.search(rendered) and rendered != template:
+            return self._render_string(rendered, context, env, _depth + 1)
+        return rendered
     
     def _evaluate_expression(
         self,
@@ -212,6 +246,8 @@ class TemplateEngine:
             pass
         
         # Unknown expression
+        if self._strict:
+            raise KeyError(f"Unknown template variable: {expr}")
         logger.debug(f"Unknown expression: {expr}")
         return None
     

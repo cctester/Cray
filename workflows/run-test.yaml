@@ -1,0 +1,9 @@
+description: Test run
+name: run-test
+steps:
+- action: exec
+  name: echo
+  params:
+    command: echo test
+  plugin: shell
+version: '1.0'

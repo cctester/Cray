@@ -9,6 +9,7 @@ from enum import Enum
 from datetime import datetime
 import yaml
 from pydantic import BaseModel, Field
+from loguru import logger
 
 
 class Step(BaseModel):
@@ -77,6 +78,21 @@ class Workflow(BaseModel):
     class Config:
         extra = "allow"
 
+    @staticmethod
+    def _parse_triggers(trigger_data_list: list) -> List[Trigger]:
+        """Parse trigger data from YAML into Trigger objects."""
+        triggers = []
+        for trigger_data in trigger_data_list:
+            if isinstance(trigger_data, dict):
+                if "schedule" in trigger_data:
+                    triggers.append(Trigger.schedule(trigger_data["schedule"]))
+                elif trigger_data.get("manual"):
+                    triggers.append(Trigger.manual())
+            elif isinstance(trigger_data, str):
+                if trigger_data == "manual":
+                    triggers.append(Trigger.manual())
+        return triggers
+
     @classmethod
     def from_yaml(cls, path: str | Path) -> "Workflow":
         """Load workflow from YAML file."""
@@ -88,19 +104,7 @@ class Workflow(BaseModel):
         with open(path, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f)
 
-        # Parse triggers
-        triggers = []
-        for trigger_data in data.get("triggers", []):
-            if isinstance(trigger_data, dict):
-                if "schedule" in trigger_data:
-                    triggers.append(Trigger.schedule(trigger_data["schedule"]))
-                elif trigger_data.get("manual"):
-                    triggers.append(Trigger.manual())
-            elif isinstance(trigger_data, str):
-                if trigger_data == "manual":
-                    triggers.append(Trigger.manual())
-
-        # Parse steps
+        triggers = cls._parse_triggers(data.get("triggers", []))
         steps = [Step(**step) for step in data.get("steps", [])]
 
         return cls(
@@ -135,7 +139,7 @@ class Workflow(BaseModel):
             data["dependencies"] = self.dependencies
 
         data["triggers"] = [
-            {"schedule": t.config["cron"]} if t.type == TriggerType.SCHEDULE
+            {"schedule": t.config.get("cron", "")} if t.type == TriggerType.SCHEDULE
             else {"manual": True}
             for t in self.triggers
         ]
@@ -161,11 +165,19 @@ class Workflow(BaseModel):
 
         if not self.steps:
             errors.append("Workflow has no steps defined")
+            return errors
 
         step_names = [s.name for s in self.steps]
         duplicates = [n for n in step_names if step_names.count(n) > 1]
         if duplicates:
             errors.append(f"Duplicate step names: {set(duplicates)}")
+
+        # Validate depends_on references
+        name_set = set(step_names)
+        for step in self.steps:
+            for dep in step.depends_on:
+                if dep not in name_set:
+                    errors.append(f"Step '{step.name}' depends_on '{dep}' which does not exist")
 
         return errors
 
@@ -174,19 +186,7 @@ class Workflow(BaseModel):
         """Load workflow from YAML string."""
         data = yaml.safe_load(yaml_content)
 
-        # Parse triggers
-        triggers = []
-        for trigger_data in data.get("triggers", []):
-            if isinstance(trigger_data, dict):
-                if "schedule" in trigger_data:
-                    triggers.append(Trigger.schedule(trigger_data["schedule"]))
-                elif trigger_data.get("manual"):
-                    triggers.append(Trigger.manual())
-            elif isinstance(trigger_data, str):
-                if trigger_data == "manual":
-                    triggers.append(Trigger.manual())
-
-        # Parse steps
+        triggers = cls._parse_triggers(data.get("triggers", []))
         steps = [Step(**step) for step in data.get("steps", [])]
 
         return cls(
@@ -302,10 +302,12 @@ class WorkflowManager:
 
         return self._workflows[cache_key]
 
-    def delete_workflow(self, workflow_id: str):
-        """Delete a workflow."""
+    def delete_workflow(self, workflow_id: str) -> bool:
+        """Delete a workflow. Returns True if deleted, False if not found."""
         if workflow_id in self._workflows:
             workflow_path = Path(self._workflows[workflow_id]["file_path"])
             if workflow_path.exists():
                 workflow_path.unlink()
             del self._workflows[workflow_id]
+            return True
+        return False

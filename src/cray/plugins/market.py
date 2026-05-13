@@ -283,23 +283,58 @@ class PluginRegistry:
 class PluginMarket:
     """
     Plugin marketplace for managing plugins.
-    
+
     Features:
     - Search and discover plugins
     - Install/uninstall plugins
     - Update plugins
     - List installed plugins
+
+    Security:
+    - By default, arbitrary pip dependencies are blocked.
+    - Set allow_arbitrary_deps=True to allow (not recommended).
+    - When allow_arbitrary_deps=False, --no-deps is used for pip install
+      to prevent transitive arbitrary package installs.
     """
+
+    # Known safe packages commonly used by plugins
+    _SAFE_PACKAGES = {
+        "requests", "aiohttp", "httpx", "redis", "boto3",
+        "pandas", "numpy", "jinja2", "pyyaml", "toml",
+        "python-dateutil", "pytz", "click", "rich",
+    }
 
     def __init__(
         self,
         plugin_dir: Optional[Path] = None,
-        registry: Optional[PluginRegistry] = None
+        registry: Optional[PluginRegistry] = None,
+        allow_arbitrary_deps: bool = False,
     ):
         self.plugin_dir = plugin_dir or Path.home() / ".cray" / "plugins"
         self.plugin_dir.mkdir(parents=True, exist_ok=True)
         self.registry = registry or PluginRegistry()
         self._installed_cache: Optional[Dict[str, PluginManifest]] = None
+        self._allow_arbitrary_deps = allow_arbitrary_deps
+
+    @staticmethod
+    def _is_safe_dependency(dep_spec: str) -> bool:
+        """Check if a dependency spec is safe to install.
+
+        Only allows known-safe package names without extras or URLs.
+        """
+        # Extract package name (before version specifiers)
+        import re
+        match = re.match(r'^([a-zA-Z0-9]([a-zA-Z0-9._-]*[a-zA-Z0-9])?)', dep_spec)
+        if not match:
+            return False
+        pkg_name = match.group(1).lower().replace("-", "_")
+        # Block URL-based installs
+        if "://" in dep_spec or "@" in dep_spec:
+            return False
+        # Block local file installs
+        if dep_spec.startswith(".") or dep_spec.startswith("/"):
+            return False
+        return pkg_name in PluginMarket._SAFE_PACKAGES
 
     def search(
         self,
@@ -365,16 +400,26 @@ class PluginMarket:
         
         plugin_path.mkdir(parents=True, exist_ok=True)
 
-        # Install dependencies
+        # Install dependencies — with safety checks
         if info.dependencies:
+            if not self._allow_arbitrary_deps:
+                # Only allow deps that match known safe patterns
+                blocked = [d for d in info.dependencies if not self._is_safe_dependency(d)]
+                if blocked:
+                    raise ValueError(
+                        f"Plugin '{name}' has blocked dependencies: {blocked}. "
+                        f"Set allow_arbitrary_deps=True in config to allow."
+                    )
             logger.info(f"Installing dependencies for '{name}'...")
             for dep in info.dependencies:
                 try:
-                    subprocess.run(
-                        [sys.executable, "-m", "pip", "install", dep],
-                        check=True,
-                        capture_output=True
-                    )
+                    # Use --no-deps to prevent transitive arbitrary installs
+                    # unless explicitly allowed
+                    cmd = [sys.executable, "-m", "pip", "install"]
+                    if not self._allow_arbitrary_deps:
+                        cmd.append("--no-deps")
+                    cmd.append(dep)
+                    subprocess.run(cmd, check=True, capture_output=True)
                     logger.debug(f"Installed dependency: {dep}")
                 except subprocess.CalledProcessError as e:
                     logger.warning(f"Failed to install dependency {dep}: {e}")

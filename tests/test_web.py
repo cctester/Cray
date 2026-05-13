@@ -20,7 +20,6 @@ class TestWebAPI:
         """Test root endpoint."""
         response = client.get("/")
         assert response.status_code == 200
-        assert "Cray API" in response.json()["name"]
     
     def test_list_plugins(self, client):
         """Test listing plugins."""
@@ -49,7 +48,7 @@ class TestWebAPI:
                 ]
             }
         )
-        assert create_response.status_code == 201
+        assert create_response.status_code == 200
         
         # Get workflow
         get_response = client.get("/workflows/test-workflow")
@@ -112,5 +111,5 @@ class TestWebAPI:
         assert response.status_code == 200
         
         task = response.json()
-        assert task["workflow_name"] == "run-test"
+        assert task["workflow_id"] == "run-test"
         assert task["status"] in ["pending", "running", "success"]

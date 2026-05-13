@@ -11,6 +11,8 @@ Features:
 import json
 import shutil
 import hashlib
+import difflib
+import threading
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime
@@ -37,8 +39,10 @@ class WorkflowVersion:
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "WorkflowVersion":
-        """Create from dictionary."""
-        return cls(**data)
+        """Create from dictionary. Ignores unknown keys for forward compatibility."""
+        known_fields = {f.name for f in cls.__dataclass_fields__.values()}
+        filtered = {k: v for k, v in data.items() if k in known_fields}
+        return cls(**filtered)
 
 
 @dataclass
@@ -311,22 +315,20 @@ class WorkflowVersionManager:
         # Simple line-by-line diff
         lines1 = v1.content.splitlines()
         lines2 = v2.content.splitlines()
-        
+
         additions = 0
         deletions = 0
         changes = []
-        
-        # Find added and deleted lines
-        set1 = set(lines1)
-        set2 = set(lines2)
-        
-        for line in set2 - set1:
-            additions += 1
-            changes.append({"type": "add", "line": line})
-        
-        for line in set1 - set2:
-            deletions += 1
-            changes.append({"type": "delete", "line": line})
+
+        # Use difflib for proper ordered diff
+        diff = difflib.unified_diff(lines1, lines2, lineterm="")
+        for line in diff:
+            if line.startswith("+") and not line.startswith("+++"):
+                additions += 1
+                changes.append({"type": "add", "line": line[1:]})
+            elif line.startswith("-") and not line.startswith("---"):
+                deletions += 1
+                changes.append({"type": "delete", "line": line[1:]})
         
         return VersionDiff(
             from_version=from_version,
@@ -376,22 +378,32 @@ class WorkflowVersionManager:
     ) -> bool:
         """
         Delete a version from history.
-        
+
         Args:
             workflow_name: Name of the workflow
             version_id: Version to delete
-            
+
         Returns:
             True if deleted
         """
         wf_dir = self._get_workflow_dir(workflow_name)
         version_file = wf_dir / f"{version_id}.json"
-        
+
         if not version_file.exists():
             return False
-        
+
+        # Re-link children that point to this version
+        deleted = self.get_version(workflow_name, version_id)
+        new_parent = deleted.parent_version if deleted else None
+        versions = self.list_versions(workflow_name)
+        for v in versions:
+            if v.parent_version == version_id:
+                v.parent_version = new_parent
+                vf = wf_dir / f"{v.version_id}.json"
+                vf.write_text(json.dumps(v.to_dict(), indent=2))
+
         version_file.unlink()
-        
+
         # Update index
         index_file = wf_dir / "index.json"
         if index_file.exists():
@@ -399,18 +411,20 @@ class WorkflowVersionManager:
             if version_id in index["versions"]:
                 index["versions"].remove(version_id)
             index_file.write_text(json.dumps(index, indent=2))
-        
+
         logger.info(f"Deleted version {version_id}")
         return True
 
 
 # Global version manager
 _version_manager: Optional[WorkflowVersionManager] = None
+_version_manager_lock = threading.Lock()
 
 
 def get_version_manager() -> WorkflowVersionManager:
-    """Get the global version manager instance."""
+    """Get the global version manager instance (thread-safe)."""
     global _version_manager
-    if _version_manager is None:
-        _version_manager = WorkflowVersionManager()
+    with _version_manager_lock:
+        if _version_manager is None:
+            _version_manager = WorkflowVersionManager()
     return _version_manager

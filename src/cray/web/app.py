@@ -10,7 +10,7 @@ from typing import Dict, Set, Any, Optional
 
 import psutil
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from starlette.middleware.cors import CORSMiddleware
@@ -25,15 +25,41 @@ logger.add(sys.stderr, level="WARNING", format="{time:HH:mm:ss} | {level: <8} | 
 from cray.core.runner import WorkflowRunner
 from cray.core.workflow import WorkflowManager
 from cray.core.versioning import WorkflowVersionManager, get_version_manager
-from cray.plugins import PluginManager
+from cray.plugins import PluginRegistry, PluginManager
 
 # Import Any for type hints
 from typing import Any
+
+import os
+
+
+# ── API Key Authentication ──────────────────────────────────────────
+
+_API_KEY: Optional[str] = os.environ.get("CRAY_API_KEY")
+
+
+async def verify_api_key(request: Request) -> None:
+    """Dependency that verifies API key if CRAY_API_KEY is set.
+
+    If CRAY_API_KEY env var is not set, all requests are allowed (dev mode).
+    If set, requests must include `X-API-Key` header matching the value.
+    """
+    if _API_KEY is None:
+        return  # No auth required in dev mode
+
+    api_key = request.headers.get("X-API-Key")
+    if not api_key:
+        api_key = request.query_params.get("api_key")
+
+    if api_key != _API_KEY:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
 
 # Connection manager for WebSocket
 class ConnectionManager:
     """Manages WebSocket connections and broadcasts."""
+
+    MAX_CONNECTIONS = 100  # Limit concurrent WebSocket connections
 
     def __init__(self):
         self.active_connections: Set[WebSocket] = set()
@@ -41,10 +67,16 @@ class ConnectionManager:
 
     async def connect(self, websocket: WebSocket):
         """Accept a new WebSocket connection."""
+        async with self._lock:
+            if len(self.active_connections) >= self.MAX_CONNECTIONS:
+                await websocket.close(code=1013, reason="Too many connections")
+                logger.warning("WebSocket connection rejected: max connections reached")
+                return False
         await websocket.accept()
         async with self._lock:
             self.active_connections.add(websocket)
         logger.info(f"WebSocket connected. Total connections: {len(self.active_connections)}")
+        return True
 
     async def disconnect(self, websocket: WebSocket):
         """Remove a WebSocket connection."""
@@ -108,7 +140,8 @@ storage = get_storage(
 # Initialize managers
 workflow_manager = WorkflowManager()
 runner = WorkflowRunner(storage=storage)
-plugin_registry = PluginManager()
+plugin_manager = PluginManager()
+plugin_registry = PluginRegistry()
 version_manager = get_version_manager()
 
 
@@ -235,9 +268,12 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Cray Dashboard", lifespan=lifespan)
 
 # Add CORS middleware
+_CORS_ORIGINS = os.environ.get("CRAY_CORS_ORIGINS", "").split(",")
+_CORS_ORIGINS = [o.strip() for o in _CORS_ORIGINS if o.strip()] or ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_CORS_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -268,21 +304,24 @@ async def websocket_endpoint(websocket: WebSocket):
         await manager.disconnect(websocket)
 
 
-# API Routes
+# API Routes (with /api prefix)
 @app.get("/api/workflows")
-async def list_workflows():
+async def list_workflows(_auth=Depends(verify_api_key)):
     """List all workflows."""
     return workflow_manager.list_workflows()
 
 
 @app.get("/api/workflows/{workflow_id}")
-async def get_workflow(workflow_id: str):
+async def get_workflow(workflow_id: str, _auth=Depends(verify_api_key)):
     """Get a specific workflow."""
-    return workflow_manager.get_workflow(workflow_id)
+    result = workflow_manager.get_workflow(workflow_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"Workflow '{workflow_id}' not found")
+    return result
 
 
 @app.post("/api/workflows")
-async def create_workflow(workflow: dict):
+async def create_workflow(workflow: dict, _auth=Depends(verify_api_key)):
     """Create a new workflow."""
     result = workflow_manager.save_workflow(workflow)
     wf_id = workflow.get("name") or workflow.get("id")
@@ -293,7 +332,7 @@ async def create_workflow(workflow: dict):
 
 
 @app.put("/api/workflows/{workflow_id}")
-async def update_workflow(workflow_id: str, workflow: dict):
+async def update_workflow(workflow_id: str, workflow: dict, _auth=Depends(verify_api_key)):
     """Update a workflow."""
     workflow["id"] = workflow_id
     result = workflow_manager.save_workflow(workflow)
@@ -304,9 +343,11 @@ async def update_workflow(workflow_id: str, workflow: dict):
 
 
 @app.delete("/api/workflows/{workflow_id}")
-async def delete_workflow(workflow_id: str):
+async def delete_workflow(workflow_id: str, _auth=Depends(verify_api_key)):
     """Delete a workflow."""
-    workflow_manager.delete_workflow(workflow_id)
+    deleted = workflow_manager.delete_workflow(workflow_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Workflow '{workflow_id}' not found")
     return {"status": "deleted"}
 
 
@@ -352,19 +393,19 @@ async def diff_workflow_versions(workflow_id: str, from_version: str, to_version
 
 
 @app.get("/api/runs")
-async def list_runs():
+async def list_runs(_auth=Depends(verify_api_key)):
     """List all runs."""
     return runner.list_runs()
 
 
 @app.get("/api/runs/{run_id}")
-async def get_run(run_id: str):
+async def get_run(run_id: str, _auth=Depends(verify_api_key)):
     """Get a specific run."""
     return runner.get_run(run_id)
 
 
 @app.post("/api/runs")
-async def create_run(request: dict):
+async def create_run(request: dict, _auth=Depends(verify_api_key)):
     """Start a new run."""
     workflow_id = request.get("workflow_id")
     input_data = request.get("input", {})
@@ -372,13 +413,13 @@ async def create_run(request: dict):
 
 
 @app.post("/api/runs/{run_id}/stop")
-async def stop_run(run_id: str):
+async def stop_run(run_id: str, _auth=Depends(verify_api_key)):
     """Stop a running workflow."""
     return await runner.stop_run(run_id)
 
 
 @app.get("/api/plugins")
-async def list_plugins():
+async def list_plugins(_auth=Depends(verify_api_key)):
     """List all available plugins."""
     result = []
     for name in ["shell", "http", "file", "json", "database", "git", "redis", "aws", "email", "notify", "math", "text"]:
@@ -393,7 +434,7 @@ async def list_plugins():
 
 
 @app.get("/api/plugins/{plugin_name}")
-async def get_plugin(plugin_name: str):
+async def get_plugin(plugin_name: str, _auth=Depends(verify_api_key)):
     """Get plugin details."""
     plugin = plugin_registry.get_plugin(plugin_name)
     if not plugin:
@@ -453,7 +494,7 @@ async def get_realtime_metrics():
 
 # Run workflow from YAML
 @app.post("/api/workflows/run")
-async def run_workflow_yaml(request: dict):
+async def run_workflow_yaml(request: dict, _auth=Depends(verify_api_key)):
     """Run a workflow from YAML."""
     yaml_content = request.get("yaml")
     return await runner.run_from_yaml(yaml_content)
@@ -463,6 +504,71 @@ async def run_workflow_yaml(request: dict):
 async def health_check():
     """Health check endpoint."""
     return {"status": "healthy", "service": "cray-api"}
+
+
+# Legacy routes (without /api prefix) for backward compatibility
+@app.get("/workflows")
+async def list_workflows_legacy():
+    """List all workflows (legacy)."""
+    return workflow_manager.list_workflows()
+
+
+@app.get("/workflows/{workflow_id}")
+async def get_workflow_legacy(workflow_id: str):
+    """Get a specific workflow (legacy)."""
+    return workflow_manager.get_workflow(workflow_id)
+
+
+@app.post("/workflows")
+async def create_workflow_legacy(workflow: dict):
+    """Create a new workflow (legacy)."""
+    result = workflow_manager.save_workflow(workflow)
+    await broadcaster.on_workflow_created(result)
+    return result
+
+
+@app.put("/workflows/{workflow_id}")
+async def update_workflow_legacy(workflow_id: str, workflow: dict):
+    """Update a workflow (legacy)."""
+    workflow["id"] = workflow_id
+    result = workflow_manager.save_workflow(workflow)
+    await broadcaster.on_workflow_updated(result)
+    return result
+
+
+@app.delete("/workflows/{workflow_id}")
+async def delete_workflow_legacy(workflow_id: str):
+    """Delete a workflow (legacy)."""
+    workflow_manager.delete_workflow(workflow_id)
+    return {"status": "deleted"}
+
+
+@app.get("/plugins")
+async def list_plugins_legacy():
+    """List all available plugins (legacy)."""
+    return plugin_manager.list_plugins()
+
+
+@app.get("/plugins/{plugin_name}")
+async def get_plugin_legacy(plugin_name: str):
+    """Get plugin details (legacy)."""
+    return plugin_manager.get_plugin(plugin_name)
+
+
+@app.post("/workflows/{workflow_id}/run")
+async def run_workflow_legacy(workflow_id: str, request: dict):
+    """Run a workflow (legacy)."""
+    input_data = request.get("input_data", {})
+    return await runner.run_workflow(workflow_id, input_data)
+
+
+def create_app(workflow_dir: str = "./workflows") -> FastAPI:
+    """Create a new FastAPI app instance (for testing)."""
+    return app
+
+
+# Serve frontend
+app.mount("/assets", StaticFiles(directory="dashboard/dist/assets"), name="assets")
 
 
 # Secrets management

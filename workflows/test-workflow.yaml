@@ -1,0 +1,9 @@
+description: Test workflow
+name: test-workflow
+steps:
+- action: exec
+  name: hello
+  params:
+    command: echo hello
+  plugin: shell
+version: '1.0'

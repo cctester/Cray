@@ -4,8 +4,8 @@ Task definition and status management.
 
 from __future__ import annotations
 from enum import Enum
-from datetime import datetime
-from typing import Any, Dict, List, Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, Field
 import uuid
 
@@ -26,7 +26,7 @@ class TaskResult(BaseModel):
     
     step_name: str
     success: bool
-    output: Any = None
+    output: Optional[Union[Dict[str, Any], str, List[Any]]] = None
     error: Optional[str] = None
     duration_ms: int = 0
 
@@ -34,10 +34,10 @@ class TaskResult(BaseModel):
 class Task(BaseModel):
     """Task instance - a single execution of a workflow."""
     
-    id: str = Field(default_factory=lambda: str(uuid.uuid4())[:8])
+    id: str = Field(default_factory=lambda: str(uuid.uuid4())[:16])
     workflow_name: str
     status: TaskStatus = TaskStatus.PENDING
-    created_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
     input: Dict[str, Any] = Field(default_factory=dict)
@@ -48,23 +48,27 @@ class Task(BaseModel):
     def start(self) -> None:
         """Mark task as started."""
         self.status = TaskStatus.RUNNING
-        self.started_at = datetime.now()
-    
+        self.started_at = datetime.now(timezone.utc)
+
     def succeed(self) -> None:
         """Mark task as succeeded."""
         self.status = TaskStatus.SUCCESS
-        self.finished_at = datetime.now()
-    
+        self.finished_at = datetime.now(timezone.utc)
+
     def fail(self, error: str) -> None:
         """Mark task as failed."""
         self.status = TaskStatus.FAILED
         self.error = error
-        self.finished_at = datetime.now()
-    
+        self.finished_at = datetime.now(timezone.utc)
+
     def skip(self) -> None:
         """Mark task as skipped."""
         self.status = TaskStatus.SKIPPED
-        self.finished_at = datetime.now()
+        self.finished_at = datetime.now(timezone.utc)
+
+    def retry(self) -> None:
+        """Mark task as retrying."""
+        self.status = TaskStatus.RETRYING
     
     @property
     def duration_seconds(self) -> Optional[float]:
@@ -87,5 +91,5 @@ class Task(BaseModel):
         self.results.append(result)
         
         # Update output with step result
-        if result.success and result.output:
+        if result.success and result.output is not None:
             self.output[result.step_name] = result.output

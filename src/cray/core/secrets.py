@@ -95,13 +95,21 @@ class SecretsManager:
         """Initialize encrypted file storage."""
         if not CRYPTO_AVAILABLE:
             raise RuntimeError("cryptography package required for file storage")
-        
+
         self.storage_path.mkdir(parents=True, exist_ok=True)
         self.storage_path.chmod(0o700)
-        
+
         if encryption_key:
             self._init_encryption(encryption_key)
-        
+        else:
+            # No encryption key provided — warn and store plaintext
+            logger.warning(
+                "No encryption_key provided. Secrets will be stored as PLAINTEXT. "
+                "Set CRAY_SECRETS_KEY environment variable or pass encryption_key "
+                "to enable encryption."
+            )
+            self._fernet = None
+
         self._load_metadata()
     
     def _init_encryption(self, password: str) -> None:

@@ -2,6 +2,7 @@
 Email plugin - send emails via SMTP.
 """
 
+import asyncio
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
@@ -86,20 +87,23 @@ class EmailPlugin(Plugin):
             self._attach_file(msg, attachment)
         
         logger.debug(f"Sending email to: {to}")
-        
+
         try:
-            # Connect and send
-            if use_tls:
-                smtp = smtplib.SMTP(smtp_host, smtp_port)
-                smtp.starttls()
-            else:
-                smtp = smtplib.SMTP(smtp_host, smtp_port)
-            
-            if smtp_user and smtp_password:
-                smtp.login(smtp_user, smtp_password)
-            
-            smtp.sendmail(from_addr, to, msg.as_string())
-            smtp.quit()
+            # Connect and send — run in executor to avoid blocking event loop
+            loop = asyncio.get_running_loop()
+
+            def _smtp_send():
+                if use_tls:
+                    smtp = smtplib.SMTP(smtp_host, smtp_port)
+                    smtp.starttls()
+                else:
+                    smtp = smtplib.SMTP(smtp_host, smtp_port)
+                if smtp_user and smtp_password:
+                    smtp.login(smtp_user, smtp_password)
+                smtp.sendmail(from_addr, to, msg.as_string())
+                smtp.quit()
+
+            await loop.run_in_executor(None, _smtp_send)
             
             return {
                 "to": to,

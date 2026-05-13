@@ -78,3 +78,6 @@ dashboard/dist/
 *.log
 backups/
 data.json
+
+# Review files
+review_*.md

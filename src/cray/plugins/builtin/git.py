@@ -80,26 +80,26 @@ class GitPlugin(Plugin):
         cwd: Optional[str] = None,
         env: Optional[Dict[str, str]] = None
     ) -> Dict[str, Any]:
-        """Run a git command."""
+        """Run a git command.
+
+        All user-provided values are passed as separate arguments to
+        subprocess_exec (not shell=True) to prevent command injection.
+        """
         try:
             # Merge environment
             cmd_env = os.environ.copy()
             if env:
                 cmd_env.update(env)
 
-            # Build command
+            # Build command — each arg is passed separately, no shell injection possible
             cmd = ["git"] + args
 
-            loop = asyncio.get_event_loop()
-            proc = await loop.run_in_executor(
-                None,
-                lambda: asyncio.create_subprocess_exec(
-                    *cmd,
-                    cwd=cwd,
-                    env=cmd_env,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
-                )
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                cwd=cwd,
+                env=cmd_env,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
             )
 
             # Wait for completion

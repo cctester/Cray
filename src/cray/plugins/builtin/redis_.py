@@ -1,8 +1,11 @@
-"""
-Redis plugin for Cray - provides basic Redis operations.
+""" Redis plugin for Cray - provides basic Redis operations.
+
+Security notes:
+- Uses SCAN instead of KEYS for production safety.
+- flushdb requires explicit allow_dangerous_actions=True in config.
 """
 
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from loguru import logger
 
 try:
@@ -16,29 +19,57 @@ from cray.plugins import Plugin
 
 
 class RedisPlugin(Plugin):
-    """Plugin for Redis operations."""
+    """Plugin for Redis operations.
+
+    Config options:
+        allow_dangerous_actions: Allow flushdb and similar destructive ops (default: False)
+        default_host: Default Redis host (default: localhost)
+        default_port: Default Redis port (default: 6379)
+    """
 
     name = "redis"
     description = "Redis cache and queue operations"
-    
+
+    def __init__(self):
+        super().__init__()
+        self.connections: Dict[str, aioredis.Redis] = {}
+        self._allow_dangerous_actions: bool = False
+        self._default_host: str = "localhost"
+        self._default_port: int = 6379
+
+    def configure(self, config: Dict[str, Any]) -> None:
+        """Configure the Redis plugin."""
+        self._allow_dangerous_actions = config.get("allow_dangerous_actions", False)
+        self._default_host = config.get("default_host", "localhost")
+        self._default_port = config.get("default_port", 6379)
+
     @property
     def actions(self):
         return {
-            "connect": {"description": "Connect to Redis", "params": [{"name": "host", "type": "string", "required": True, "description": "Redis host"}, {"name": "port", "type": "number", "required": False, "description": "Redis port"}]},
-            "get": {"description": "Get value", "params": [{"name": "key", "type": "string", "required": True, "description": "Key"}]},
-            "set": {"description": "Set value", "params": [{"name": "key", "type": "string", "required": True, "description": "Key"}, {"name": "value", "type": "string", "required": True, "description": "Value"}]},
-            "delete": {"description": "Delete key", "params": [{"name": "key", "type": "string", "required": True, "description": "Key"}]},
-            "queue": {"description": "Push to queue", "params": [{"name": "queue", "type": "string", "required": True, "description": "Queue name"}, {"name": "value", "type": "string", "required": True, "description": "Value"}]},
+            "connect": {"description": "Connect to Redis", "params": [
+                {"name": "host", "type": "string", "required": True, "description": "Redis host"},
+                {"name": "port", "type": "number", "required": False, "description": "Redis port"},
+            ]},
+            "get": {"description": "Get value", "params": [
+                {"name": "key", "type": "string", "required": True, "description": "Key"},
+            ]},
+            "set": {"description": "Set value", "params": [
+                {"name": "key", "type": "string", "required": True, "description": "Key"},
+                {"name": "value", "type": "string", "required": True, "description": "Value"},
+            ]},
+            "delete": {"description": "Delete key", "params": [
+                {"name": "key", "type": "string", "required": True, "description": "Key"},
+            ]},
+            "queue": {"description": "Push to queue", "params": [
+                {"name": "queue", "type": "string", "required": True, "description": "Queue name"},
+                {"name": "value", "type": "string", "required": True, "description": "Value"},
+            ]},
         }
-    
+
     async def execute(
-        self,
-        action: str,
-        params: Dict[str, Any],
-        context: Dict[str, Any]
+        self, action: str, params: Dict[str, Any], context: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Execute a Redis action."""
-
         if not REDIS_AVAILABLE:
             return {
                 "success": False,
@@ -55,47 +86,33 @@ class RedisPlugin(Plugin):
             "keys": self._keys,
             "flushdb": self._flushdb,
         }
-
         if action not in actions:
             raise ValueError(f"Unknown action: {action}")
-
         return await actions[action](params)
 
     async def _connect(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Connect to Redis server."""
-        host = params.get("host", "localhost")
-        port = params.get("port", 6379)
+        host = params.get("host", self._default_host)
+        port = params.get("port", self._default_port)
         db = params.get("db", 0)
         password = params.get("password", None)
         connection_name = params.get("connection_name", "default")
 
         try:
             self.connections[connection_name] = aioredis.Redis(
-                host=host,
-                port=port,
-                db=db,
-                password=password,
+                host=host, port=port, db=db, password=password,
                 decode_responses=True
             )
-
             await self.connections[connection_name].ping()
-
-            return {
-                "success": True,
-                "connection": connection_name
-            }
+            return {"success": True, "connection": connection_name}
         except Exception as e:
             logger.error(f"Failed to connect to Redis: {e}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            return {"success": False, "error": str(e)}
 
     async def _get(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Get a key from Redis."""
         connection_name = params.get("connection_name", "default")
         key = params.get("key")
-
         if not key:
             raise ValueError("Missing required parameter: key")
 
@@ -103,19 +120,11 @@ class RedisPlugin(Plugin):
             redis = self.connections.get(connection_name)
             if not redis:
                 raise ValueError(f"No connection found: {connection_name}")
-
             value = await redis.get(key)
-            return {
-                "success": True,
-                "key": key,
-                "value": value
-            }
+            return {"success": True, "key": key, "value": value}
         except Exception as e:
             logger.error(f"Failed to get key: {e}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            return {"success": False, "error": str(e)}
 
     async def _set(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Set a key in Redis."""
@@ -131,25 +140,16 @@ class RedisPlugin(Plugin):
             redis = self.connections.get(connection_name)
             if not redis:
                 raise ValueError(f"No connection found: {connection_name}")
-
             await redis.set(key, value, ex=expire)
-            return {
-                "success": True,
-                "key": key,
-                "value": value
-            }
+            return {"success": True, "key": key, "value": value}
         except Exception as e:
             logger.error(f"Failed to set key: {e}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            return {"success": False, "error": str(e)}
 
     async def _delete(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Delete a key from Redis."""
         connection_name = params.get("connection_name", "default")
         key = params.get("key")
-
         if not key:
             raise ValueError("Missing required parameter: key")
 
@@ -157,24 +157,16 @@ class RedisPlugin(Plugin):
             redis = self.connections.get(connection_name)
             if not redis:
                 raise ValueError(f"No connection found: {connection_name}")
-
             await redis.delete(key)
-            return {
-                "success": True,
-                "key": key
-            }
+            return {"success": True, "key": key}
         except Exception as e:
             logger.error(f"Failed to delete key: {e}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            return {"success": False, "error": str(e)}
 
     async def _exists(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Check if a key exists in Redis."""
         connection_name = params.get("connection_name", "default")
         key = params.get("key")
-
         if not key:
             raise ValueError("Missing required parameter: key")
 
@@ -182,79 +174,94 @@ class RedisPlugin(Plugin):
             redis = self.connections.get(connection_name)
             if not redis:
                 raise ValueError(f"No connection found: {connection_name}")
-
             exists = await redis.exists(key)
-            return {
-                "success": True,
-                "key": key,
-                "exists": bool(exists)
-            }
+            return {"success": True, "key": key, "exists": bool(exists)}
         except Exception as e:
             logger.error(f"Failed to check key existence: {e}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            return {"success": False, "error": str(e)}
 
     async def _keys(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """List keys matching a pattern."""
+        """List keys matching a pattern using SCAN (production-safe).
+
+        Uses SCAN instead of KEYS to avoid blocking Redis.
+        """
         connection_name = params.get("connection_name", "default")
         pattern = params.get("pattern", "*")
+        count = params.get("count", 100)
 
         try:
             redis = self.connections.get(connection_name)
             if not redis:
                 raise ValueError(f"No connection found: {connection_name}")
 
-            keys = await redis.keys(pattern)
-            return {
-                "success": True,
-                "keys": keys
-            }
+            # Use SCAN instead of KEYS for production safety
+            keys = []
+            cursor = 0
+            while True:
+                cursor, batch = await redis.scan(
+                    cursor=cursor, match=pattern, count=count
+                )
+                keys.extend(batch)
+                if cursor == 0:
+                    break
+                # Safety limit
+                if len(keys) >= 10000:
+                    logger.warning("Keys scan hit 10000 limit, truncating results")
+                    break
+
+            return {"success": True, "keys": keys}
         except Exception as e:
             logger.error(f"Failed to list keys: {e}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            return {"success": False, "error": str(e)}
 
     async def _flushdb(self, params: Dict[str, Any]) -> Dict[str, Any]:
-        """Flush the database."""
-        connection_name = params.get("connection_name", "default")
+        """Flush the database.
 
+        Requires allow_dangerous_actions=True in plugin config.
+        """
+        if not self._allow_dangerous_actions:
+            raise ValueError(
+                "flushdb is a destructive operation. "
+                "Set allow_dangerous_actions=True in plugin config to enable."
+            )
+
+        connection_name = params.get("connection_name", "default")
         try:
             redis = self.connections.get(connection_name)
             if not redis:
                 raise ValueError(f"No connection found: {connection_name}")
-
             await redis.flushdb()
-            return {
-                "success": True
-            }
+            return {"success": True}
         except Exception as e:
             logger.error(f"Failed to flush database: {e}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            return {"success": False, "error": str(e)}
 
     async def _disconnect(self, params: Dict[str, Any]) -> Dict[str, Any]:
         """Disconnect from Redis server."""
         connection_name = params.get("connection_name", "default")
-
         try:
             redis = self.connections.get(connection_name)
             if not redis:
                 raise ValueError(f"No connection found: {connection_name}")
-
             await redis.aclose()
             del self.connections[connection_name]
-            return {
-                "success": True
-            }
+            return {"success": True}
         except Exception as e:
             logger.error(f"Failed to disconnect: {e}")
-            return {
-                "success": False,
-                "error": str(e)
-            }
+            return {"success": False, "error": str(e)}
+
+    def teardown(self) -> None:
+        """Close all Redis connections."""
+        for conn_name, redis in list(self.connections.items()):
+            try:
+                # Sync close for teardown
+                import asyncio
+                try:
+                    loop = asyncio.get_running_loop()
+                    loop.create_task(redis.aclose())
+                except RuntimeError:
+                    # No running loop, create one
+                    asyncio.run(redis.aclose())
+            except Exception as e:
+                logger.warning(f"Error closing Redis connection {conn_name}: {e}")
+        self.connections.clear()
