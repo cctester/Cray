@@ -258,6 +258,120 @@ class TestPluginMarket:
             assert info.installed is True
             assert info.installed_version is not None
 
+    def test_install_creates_package_hash(self):
+        """Test that install creates a package.hash file (#5)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            plugin_dir = Path(tmpdir)
+            market = PluginMarket(plugin_dir=plugin_dir)
+
+            market.install("redis")
+
+            hash_path = plugin_dir / "redis" / "package.hash"
+            assert hash_path.exists()
+            hash_content = hash_path.read_text().strip()
+            assert len(hash_content) == 64  # SHA-256 hex digest
+
+    def test_verify_package_valid(self):
+        """Test package verification on valid plugin (#5)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            plugin_dir = Path(tmpdir)
+            market = PluginMarket(plugin_dir=plugin_dir)
+
+            market.install("git")
+
+            plugin_path = plugin_dir / "git"
+            errors = market._verify_package(plugin_path)
+            assert errors == []
+
+    def test_verify_package_missing_manifest(self):
+        """Test package verification detects missing manifest (#5)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            plugin_dir = Path(tmpdir)
+            market = PluginMarket(plugin_dir=plugin_dir)
+
+            # Create a plugin dir without manifest
+            bad_plugin = plugin_dir / "bad-plugin"
+            bad_plugin.mkdir()
+            (bad_plugin / "plugin.py").write_text("# stub")
+
+            errors = market._verify_package(bad_plugin)
+            assert any("manifest" in e.lower() for e in errors)
+
+    def test_verify_package_suspicious_files(self):
+        """Test package verification detects suspicious executable files (#5)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            plugin_dir = Path(tmpdir)
+            market = PluginMarket(plugin_dir=plugin_dir)
+
+            market.install("aws")
+
+            # Add a suspicious .sh file
+            plugin_path = plugin_dir / "aws"
+            (plugin_path / "malicious.sh").write_text("#!/bin/bash\nevil")
+
+            errors = market._verify_package(plugin_path)
+            assert any("suspicious" in e.lower() for e in errors)
+
+    def test_verify_package_hash_mismatch(self):
+        """Test package verification detects hash mismatch (#5)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            plugin_dir = Path(tmpdir)
+            market = PluginMarket(plugin_dir=plugin_dir)
+
+            market.install("slack")
+
+            # Tamper with a file
+            plugin_path = plugin_dir / "slack"
+            (plugin_path / "plugin.py").write_text("# tampered")
+
+            # Use the original hash (which won't match anymore)
+            fake_hash = "0" * 64
+            errors = market._verify_package(plugin_path, expected_hash=fake_hash)
+            assert any("hash mismatch" in e.lower() for e in errors)
+
+    def test_list_installed_skips_invalid_manifest(self):
+        """Test that list_installed skips plugins with invalid manifests (#5)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            plugin_dir = Path(tmpdir)
+            market = PluginMarket(plugin_dir=plugin_dir)
+
+            # Install a valid plugin
+            market.install("redis")
+
+            # Create a plugin with empty name in manifest
+            bad_dir = plugin_dir / "bad-plugin"
+            bad_dir.mkdir()
+            import json
+            bad_manifest = {"name": "", "version": ""}
+            (bad_dir / "manifest.json").write_text(json.dumps(bad_manifest))
+            (bad_dir / "plugin.py").write_text("# stub")
+
+            installed = market.list_installed()
+            assert "redis" in installed
+            assert "bad-plugin" not in installed
+            assert "" not in installed
+
+    def test_manifest_validate(self):
+        """Test PluginManifest.validate() (#5)."""
+        # Valid manifest
+        good = PluginManifest(name="test", version="1.0.0")
+        assert good.validate() == []
+
+        # Empty name
+        bad1 = PluginManifest(name="", version="1.0.0")
+        errors = bad1.validate()
+        assert any("name" in e.lower() for e in errors)
+
+        # Empty version
+        bad2 = PluginManifest(name="test", version="")
+        errors = bad2.validate()
+        assert any("version" in e.lower() for e in errors)
+
+        # Bad version format
+        bad3 = PluginManifest(name="test", version="abc")
+        errors = bad3.validate()
+        assert any("version" in e.lower() and "semver" in e.lower() for e in errors)
+
 
 class TestPluginMarketIntegration:
     """Integration tests for plugin market."""

@@ -9,6 +9,7 @@ Features:
 """
 
 import json
+import hashlib
 import shutil
 import subprocess
 import sys
@@ -84,6 +85,19 @@ class PluginManifest:
             data = json.load(f)
 
         return cls.from_dict(data)
+
+    def validate(self) -> List[str]:
+        """Validate manifest fields, return list of errors."""
+        errors = []
+        if not self.name:
+            errors.append("Manifest 'name' is empty")
+        if not self.version:
+            errors.append("Manifest 'version' is empty")
+        # Validate version format (semver-like: X.Y.Z or X.Y)
+        import re
+        if self.version and not re.match(r"^\d+\.\d+(\.\d+)?", self.version):
+            errors.append(f"Manifest 'version' '{self.version}' is not valid semver (e.g. 1.0.0)")
+        return errors
 
 
 class PluginRegistry:
@@ -336,6 +350,72 @@ class PluginMarket:
             return False
         return pkg_name in PluginMarket._SAFE_PACKAGES
 
+    @staticmethod
+    def _compute_package_hash(plugin_path: Path) -> str:
+        """Compute SHA-256 hash of all files in a plugin package.
+
+        Returns hex digest of the combined file hashes, sorted by path
+        for deterministic output.
+        """
+        file_hashes = []
+        for fp in sorted(plugin_path.rglob("*")):
+            if fp.is_file() and fp.name != "package.hash":
+                rel = fp.relative_to(plugin_path)
+                content = fp.read_bytes()
+                h = hashlib.sha256(content).hexdigest()
+                file_hashes.append(f"{rel}:{h}")
+        combined = "\n".join(file_hashes)
+        return hashlib.sha256(combined.encode()).hexdigest()
+
+    def _verify_package(self, plugin_path: Path, expected_hash: Optional[str] = None) -> List[str]:
+        """Verify an installed plugin package integrity.
+
+        Checks:
+        - manifest.json exists and is valid
+        - plugin.py exists
+        - No unexpected executable files (.sh, .bat, .cmd, .ps1)
+        - If expected_hash provided, verify it matches
+
+        Returns list of verification errors (empty = valid).
+        """
+        errors = []
+
+        # Check required files
+        manifest_path = plugin_path / "manifest.json"
+        if not manifest_path.exists():
+            errors.append(f"Missing manifest.json in {plugin_path.name}")
+        else:
+            try:
+                manifest = PluginManifest.from_file(manifest_path)
+                manifest_errors = manifest.validate()
+                errors.extend(manifest_errors)
+            except Exception as e:
+                errors.append(f"Invalid manifest.json: {e}")
+
+        plugin_py = plugin_path / "plugin.py"
+        if not plugin_py.exists():
+            errors.append(f"Missing plugin.py in {plugin_path.name}")
+
+        # Check for dangerous executable files
+        dangerous_extensions = {".sh", ".bat", ".cmd", ".ps1", ".exe", ".dll", ".so"}
+        for fp in plugin_path.rglob("*"):
+            if fp.is_file() and fp.suffix.lower() in dangerous_extensions:
+                errors.append(
+                    f"Suspicious file found: {fp.relative_to(plugin_path)}. "
+                    f"Plugins should not contain executable files."
+                )
+
+        # Verify package hash if provided
+        if expected_hash is not None:
+            actual_hash = self._compute_package_hash(plugin_path)
+            if actual_hash != expected_hash:
+                errors.append(
+                    f"Package hash mismatch: expected {expected_hash[:16]}... "
+                    f"got {actual_hash[:16]}..."
+                )
+
+        return errors
+
     def search(
         self,
         query: str = "",
@@ -441,6 +521,19 @@ class PluginMarket:
         # Create plugin stub file
         self._create_plugin_stub(plugin_path, manifest)
 
+        # Verify installed package integrity
+        verify_errors = self._verify_package(plugin_path)
+        if verify_errors:
+            logger.warning(
+                f"Package verification issues for '{name}': {verify_errors}"
+            )
+
+        # Save package hash for future integrity checks
+        package_hash = self._compute_package_hash(plugin_path)
+        hash_path = plugin_path / "package.hash"
+        with open(hash_path, "w", encoding="utf-8") as f:
+            f.write(package_hash)
+
         # Invalidate cache
         self._installed_cache = None
 
@@ -533,7 +626,7 @@ plugin = {manifest.name.capitalize()}Plugin
             return self._installed_cache
 
         installed = {}
-        
+
         if not self.plugin_dir.exists():
             return installed
 
@@ -543,6 +636,25 @@ plugin = {manifest.name.capitalize()}Plugin
                 if manifest_path.exists():
                     try:
                         manifest = PluginManifest.from_file(manifest_path)
+                        # Validate manifest fields
+                        manifest_errors = manifest.validate()
+                        if manifest_errors:
+                            logger.warning(
+                                f"Invalid manifest for {plugin_path.name}: {manifest_errors}"
+                            )
+                            continue
+                        # Verify package integrity if hash exists
+                        hash_path = plugin_path / "package.hash"
+                        if hash_path.exists():
+                            expected_hash = hash_path.read_text(encoding="utf-8").strip()
+                            verify_errors = self._verify_package(
+                                plugin_path, expected_hash=expected_hash
+                            )
+                            if verify_errors:
+                                logger.warning(
+                                    f"Integrity check failed for {plugin_path.name}: {verify_errors}"
+                                )
+                                continue
                         installed[manifest.name] = manifest
                     except Exception as e:
                         logger.warning(f"Failed to load manifest for {plugin_path.name}: {e}")
