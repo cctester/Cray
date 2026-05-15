@@ -260,11 +260,11 @@ variables:
   timeout: 30
 
 steps:
-  - name: echo_vars
-    plugin: shell
-    action: exec
-    params:
-      command: echo "URL: {{ input.base_url }}, Timeout: {{ input.timeout }}"
+- name: echo_vars
+  plugin: shell
+  action: exec
+  params:
+    command: 'echo "URL: {{ input.base_url }}, Timeout: {{ input.timeout }}"'
 """)
         
         workflow = Workflow.from_yaml(workflow_yaml)
@@ -285,17 +285,17 @@ steps:
 name: step-reference-test
 
 steps:
-  - name: generate
-    plugin: shell
-    action: exec
-    params:
-      command: echo "generated_value"
+- name: generate
+  plugin: shell
+  action: exec
+  params:
+    command: echo "generated_value"
 
-  - name: use_generated
-    plugin: shell
-    action: exec
-    params:
-      command: echo "Got: {{ steps.generate.stdout }}"
+- name: use_generated
+  plugin: shell
+  action: exec
+  params:
+    command: 'echo "Got: {{ steps.generate.stdout }}"'
 """)
         
         workflow = Workflow.from_yaml(workflow_yaml)

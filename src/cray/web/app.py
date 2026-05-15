@@ -27,11 +27,6 @@ from cray.core.workflow import WorkflowManager
 from cray.core.versioning import WorkflowVersionManager, get_version_manager
 from cray.plugins import PluginRegistry, PluginManager
 
-# Import Any for type hints
-from typing import Any
-
-import os
-
 
 # ── API Key Authentication ──────────────────────────────────────────
 
@@ -283,7 +278,9 @@ app.add_middleware(
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """WebSocket endpoint for real-time updates."""
-    await manager.connect(websocket)
+    connected = await manager.connect(websocket)
+    if not connected:
+        return  # Max connections reached, already closed
     try:
         while True:
             # Wait for any message from client (ping/pong or commands)
@@ -323,6 +320,8 @@ async def get_workflow(workflow_id: str, _auth=Depends(verify_api_key)):
 @app.post("/api/workflows")
 async def create_workflow(workflow: dict, _auth=Depends(verify_api_key)):
     """Create a new workflow."""
+    if not workflow.get("name") and not workflow.get("id"):
+        raise HTTPException(status_code=400, detail="workflow name or id is required")
     result = workflow_manager.save_workflow(workflow)
     wf_id = workflow.get("name") or workflow.get("id")
     if wf_id and workflow.get("content"):
@@ -353,14 +352,14 @@ async def delete_workflow(workflow_id: str, _auth=Depends(verify_api_key)):
 
 # Workflow versioning
 @app.get("/api/workflows/{workflow_id}/versions")
-async def list_workflow_versions(workflow_id: str):
+async def list_workflow_versions(workflow_id: str, _auth=Depends(verify_api_key)):
     """List versions of a workflow."""
     versions = version_manager.list_versions(workflow_id)
     return [v.to_dict() for v in versions]
 
 
 @app.post("/api/workflows/{workflow_id}/versions")
-async def save_workflow_version(workflow_id: str, request: dict):
+async def save_workflow_version(workflow_id: str, request: dict, _auth=Depends(verify_api_key)):
     """Save a new version of a workflow."""
     content = request.get("content", "")
     message = request.get("message", "")
@@ -369,20 +368,22 @@ async def save_workflow_version(workflow_id: str, request: dict):
 
 
 @app.post("/api/workflows/{workflow_id}/rollback/{version_id}")
-async def rollback_workflow(workflow_id: str, version_id: str):
+async def rollback_workflow(workflow_id: str, version_id: str, _auth=Depends(verify_api_key)):
     """Rollback workflow to a specific version."""
     logger.info(f"Rolling back {workflow_id} to version {version_id}")
     success = version_manager.rollback(workflow_id, version_id)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Rollback failed: version {version_id} not found for workflow {workflow_id}")
     logger.info(f"Rollback result: {success}")
     return {"success": success, "workflow_id": workflow_id, "version_id": version_id}
 
 
 @app.get("/api/workflows/{workflow_id}/diff/{from_version}/{to_version}")
-async def diff_workflow_versions(workflow_id: str, from_version: str, to_version: str):
+async def diff_workflow_versions(workflow_id: str, from_version: str, to_version: str, _auth=Depends(verify_api_key)):
     """Compare two versions of a workflow."""
     diff = version_manager.diff(workflow_id, from_version, to_version)
     if not diff:
-        return {"error": "Versions not found"}
+        raise HTTPException(status_code=404, detail="One or both versions not found")
     return {
         "from_version": diff.from_version,
         "to_version": diff.to_version,
@@ -401,13 +402,18 @@ async def list_runs(_auth=Depends(verify_api_key)):
 @app.get("/api/runs/{run_id}")
 async def get_run(run_id: str, _auth=Depends(verify_api_key)):
     """Get a specific run."""
-    return runner.get_run(run_id)
+    result = runner.get_run(run_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"Run '{run_id}' not found")
+    return result
 
 
 @app.post("/api/runs")
 async def create_run(request: dict, _auth=Depends(verify_api_key)):
     """Start a new run."""
     workflow_id = request.get("workflow_id")
+    if not workflow_id:
+        raise HTTPException(status_code=400, detail="workflow_id is required")
     input_data = request.get("input", {})
     return await runner.run_workflow(workflow_id, input_data)
 
@@ -438,7 +444,7 @@ async def get_plugin(plugin_name: str, _auth=Depends(verify_api_key)):
     """Get plugin details."""
     plugin = plugin_registry.get_plugin(plugin_name)
     if not plugin:
-        return {"error": "Plugin not found"}
+        raise HTTPException(status_code=404, detail=f"Plugin '{plugin_name}' not found")
     return {
         "name": plugin.name,
         "description": plugin.description,
@@ -447,7 +453,7 @@ async def get_plugin(plugin_name: str, _auth=Depends(verify_api_key)):
 
 
 @app.get("/api/metrics/summary")
-async def get_metrics_summary():
+async def get_metrics_summary(_auth=Depends(verify_api_key)):
     """Get metrics summary."""
     runs = runner.list_runs()
     total = len(runs)
@@ -464,16 +470,16 @@ async def get_metrics_summary():
 
 
 @app.get("/api/metrics/realtime")
-async def get_realtime_metrics():
+async def get_realtime_metrics(_auth=Depends(verify_api_key)):
     """Get real-time metrics."""
     process = psutil.Process()
-    
+
     runs = runner.list_runs()
     total = len(runs)
     running = len([r for r in runs if r.get("status") == "running"])
     success = len([r for r in runs if r.get("status") == "success"])
     failed = len([r for r in runs if r.get("status") == "failed"])
-    
+
     return {
         "timestamp": time.time(),
         "workflows": {
@@ -482,7 +488,6 @@ async def get_realtime_metrics():
             "successful": success,
             "failed": failed,
             "success_rate": round(success / total * 100, 1) if total > 0 else 0,
-            "avg_duration_ms": 250,
         },
         "system": {
             "uptime_seconds": time.time() - psutil.boot_time(),
@@ -497,16 +502,19 @@ async def get_realtime_metrics():
 async def run_workflow_yaml(request: dict, _auth=Depends(verify_api_key)):
     """Run a workflow from YAML."""
     yaml_content = request.get("yaml")
+    if not yaml_content:
+        raise HTTPException(status_code=400, detail="yaml content is required")
     return await runner.run_from_yaml(yaml_content)
 
 
 @app.get("/api/health")
 async def health_check():
     """Health check endpoint."""
-    return {"status": "healthy", "service": "cray-api"}
+    return {"status": "healthy", "service": "cray-api", "timestamp": time.time()}
 
 
 # Legacy routes (without /api prefix) for backward compatibility
+# NOTE: Legacy routes do not enforce API key auth for backward compatibility
 @app.get("/workflows")
 async def list_workflows_legacy():
     """List all workflows (legacy)."""
@@ -516,7 +524,10 @@ async def list_workflows_legacy():
 @app.get("/workflows/{workflow_id}")
 async def get_workflow_legacy(workflow_id: str):
     """Get a specific workflow (legacy)."""
-    return workflow_manager.get_workflow(workflow_id)
+    result = workflow_manager.get_workflow(workflow_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"Workflow '{workflow_id}' not found")
+    return result
 
 
 @app.post("/workflows")
@@ -539,7 +550,9 @@ async def update_workflow_legacy(workflow_id: str, workflow: dict):
 @app.delete("/workflows/{workflow_id}")
 async def delete_workflow_legacy(workflow_id: str):
     """Delete a workflow (legacy)."""
-    workflow_manager.delete_workflow(workflow_id)
+    deleted = workflow_manager.delete_workflow(workflow_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"Workflow '{workflow_id}' not found")
     return {"status": "deleted"}
 
 
@@ -552,7 +565,10 @@ async def list_plugins_legacy():
 @app.get("/plugins/{plugin_name}")
 async def get_plugin_legacy(plugin_name: str):
     """Get plugin details (legacy)."""
-    return plugin_manager.get_plugin(plugin_name)
+    plugin = plugin_manager.get_plugin(plugin_name)
+    if not plugin:
+        raise HTTPException(status_code=404, detail=f"Plugin '{plugin_name}' not found")
+    return plugin
 
 
 @app.post("/workflows/{workflow_id}/run")
@@ -563,7 +579,11 @@ async def run_workflow_legacy(workflow_id: str, request: dict):
 
 
 def create_app(workflow_dir: str = "./workflows") -> FastAPI:
-    """Create a new FastAPI app instance (for testing)."""
+    """Create a new FastAPI app instance (for testing).
+
+    Note: This returns the global app singleton. The workflow_dir parameter
+    is currently ignored — workflow directory is configured via environment.
+    """
     return app
 
 
@@ -581,13 +601,13 @@ _secrets: Dict[str, str] = {}
 
 
 @app.get("/api/secrets")
-async def list_secrets():
+async def list_secrets(_auth=Depends(verify_api_key)):
     """List secret names."""
     return list(_secrets.keys())
 
 
 @app.post("/api/secrets/{name}")
-async def set_secret(name: str, request: dict):
+async def set_secret(name: str, request: dict, _auth=Depends(verify_api_key)):
     """Set a secret."""
     value = request.get("value", "")
     _secrets[name] = value
@@ -595,9 +615,9 @@ async def set_secret(name: str, request: dict):
 
 
 @app.delete("/api/secrets/{name}")
-async def delete_secret(name: str):
+async def delete_secret(name: str, _auth=Depends(verify_api_key)):
     """Delete a secret."""
-    if name in _secrets:
-        del _secrets[name]
-        return {"name": name, "status": "deleted"}
-    return {"error": "Secret not found"}
+    if name not in _secrets:
+        raise HTTPException(status_code=404, detail=f"Secret '{name}' not found")
+    del _secrets[name]
+    return {"name": name, "status": "deleted"}

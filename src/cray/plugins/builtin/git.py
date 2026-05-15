@@ -18,6 +18,74 @@ from loguru import logger
 
 from cray.plugins import Plugin
 
+# --- Input validation helpers (#24: prevent command injection) ---
+
+# Git ref names: alphanumeric, dot, dash, underscore, slash
+_REF_RE = re.compile(r'^[a-zA-Z0-9._\-/]+$')
+
+# Git config keys: sections separated by dots, alphanumeric + dash
+_CONFIG_KEY_RE = re.compile(r'^[a-zA-Z][a-zA-Z0-9\-]*(?:\.[a-zA-Z][a-zA-Z0-9\-]*)+$')
+
+# Git config values: printable ASCII, no newlines
+_CONFIG_VALUE_RE = re.compile(r'^[^\n\r]+$')
+
+# Allowed git log format specifiers (safe subset)
+_SAFE_FORMAT_RE = re.compile(r'^[%a-zA-Z0-9\s|,.\-_:()]+$')
+
+# Allowed reset modes
+_RESET_MODES = {"soft", "mixed", "hard", "merge"}
+
+# Allowed stash actions
+_STASH_ACTIONS = {"push", "pop", "list", "drop", "apply"}
+
+# Allowed branch/tag actions
+_REF_ACTIONS = {"list", "create", "delete"}
+
+# Allowed remote actions
+_REMOTE_ACTIONS = {"list", "add", "remove", "get_url"}
+
+# Allowed config actions
+_CONFIG_ACTIONS = {"get", "set", "list"}
+
+
+def _validate_ref(value: str, name: str = "ref") -> str:
+    """Validate a git ref name (branch, tag, remote name, etc.)."""
+    if not value:
+        raise ValueError(f"{name} must not be empty")
+    if not _REF_RE.match(value):
+        raise ValueError(
+            f"Invalid {name}: {value!r}. "
+            "Only alphanumeric, dot, dash, underscore, and slash allowed."
+        )
+    # Reject path traversal and dash-prefixed refs (could be flags)
+    if ".." in value or value.startswith("/") or value.startswith("-"):
+        raise ValueError(f"Invalid {name}: {value!r} (path traversal or dash prefix)")
+    return value
+
+
+def _validate_commit_hash(value: str) -> str:
+    """Validate a commit hash or ref expression."""
+    if not value:
+        raise ValueError("Commit reference must not be empty")
+    # Allow hex hashes (7-40 chars)
+    if re.match(r'^[a-fA-F0-9]{7,40}$', value):
+        return value
+    # Allow HEAD, HEAD~N, HEAD^N style
+    if re.match(r'^HEAD[~^]\d+$', value):
+        return value
+    # Otherwise validate as a ref
+    return _validate_ref(value, "commit reference")
+
+
+def _validate_path(value: str, name: str = "path") -> str:
+    """Validate a filesystem path to prevent traversal."""
+    if not value:
+        return value
+    # Block path traversal
+    if ".." in value:
+        raise ValueError(f"Invalid {name}: path traversal not allowed")
+    return value
+
 
 class GitPlugin(Plugin):
     """Git repository operations."""
@@ -72,7 +140,11 @@ class GitPlugin(Plugin):
         if action not in actions:
             return {"error": f"Unknown action: {action}"}
 
-        return await actions[action](params, context)
+        try:
+            return await actions[action](params, context)
+        except ValueError as e:
+            logger.error(f"Git plugin validation error: {e}")
+            return {"success": False, "error": str(e)}
 
     async def _run_git(
         self,
@@ -84,8 +156,20 @@ class GitPlugin(Plugin):
 
         All user-provided values are passed as separate arguments to
         subprocess_exec (not shell=True) to prevent command injection.
+        Input validation is performed in each action method before
+        calling this method.
         """
         try:
+            # Validate cwd to prevent path traversal
+            if cwd:
+                _validate_path(cwd, "cwd")
+
+            # Validate env values — no newlines (prevent header injection)
+            if env:
+                for k, v in env.items():
+                    if "\n" in v or "\r" in v:
+                        raise ValueError(f"Invalid env value for {k}: contains newlines")
+
             # Merge environment
             cmd_env = os.environ.copy()
             if env:
@@ -112,6 +196,10 @@ class GitPlugin(Plugin):
                 "stderr": stderr.decode("utf-8", errors="replace").strip(),
             }
 
+        except ValueError as e:
+            # Re-raise validation errors clearly
+            logger.error(f"Git input validation failed: {e}")
+            return {"success": False, "error": str(e)}
         except Exception as e:
             logger.error(f"Git command failed: {e}")
             return {"success": False, "error": str(e)}
@@ -144,6 +232,16 @@ class GitPlugin(Plugin):
 
         if not url:
             return {"success": False, "error": "Repository URL required"}
+
+        # #24: Validate inputs
+        _validate_path(path, "path")
+        if branch:
+            _validate_ref(branch, "branch")
+        if depth is not None:
+            try:
+                int(depth)
+            except (ValueError, TypeError):
+                return {"success": False, "error": f"Invalid depth: {depth!r}"}
 
         args = ["clone"]
 
@@ -194,6 +292,9 @@ class GitPlugin(Plugin):
         path = params.get("path", ".")
         bare = params.get("bare", False)
 
+        # #24: Validate path
+        _validate_path(path, "path")
+
         args = ["init"]
         if bare:
             args.append("--bare")
@@ -225,6 +326,9 @@ class GitPlugin(Plugin):
         path = params.get("path", ".")
         short = params.get("short", False)
         porcelain = params.get("porcelain", False)
+
+        # #24: Validate path
+        _validate_path(path, "path")
 
         args = ["status"]
         if short:
@@ -280,6 +384,14 @@ class GitPlugin(Plugin):
         files = params.get("files", ["."])
         add_all = params.get("all", False)
 
+        # #24: Validate inputs
+        _validate_path(path, "path")
+        if not add_all:
+            if isinstance(files, str):
+                files = [files]
+            for f in files:
+                _validate_path(f, "file path")
+
         args = ["add"]
 
         if add_all:
@@ -321,6 +433,13 @@ class GitPlugin(Plugin):
 
         if not files:
             return {"success": False, "error": "Files to remove required"}
+
+        # #24: Validate inputs
+        _validate_path(path, "path")
+        if isinstance(files, str):
+            files = [files]
+        for f in files:
+            _validate_path(f, "file path")
 
         args = ["rm"]
 
@@ -369,6 +488,16 @@ class GitPlugin(Plugin):
 
         if not message and not amend:
             return {"success": False, "error": "Commit message required"}
+
+        # #24: Validate inputs
+        _validate_path(path, "path")
+        if author:
+            _CONFIG_VALUE_RE.match(author) or (_ for _ in ()).throw(
+                ValueError(f"Invalid author: {author!r}")
+            )
+        if email:
+            if not re.match(r'^[^\s@\n\r]+@[^\s@\n\r]+\.[^\s@\n\r]+$', email):
+                raise ValueError(f"Invalid email: {email!r}")
 
         args = ["commit"]
 
@@ -434,6 +563,12 @@ class GitPlugin(Plugin):
         tags = params.get("tags", False)
         set_upstream = params.get("set_upstream", False)
 
+        # #24: Validate inputs
+        _validate_path(path, "path")
+        _validate_ref(remote, "remote")
+        if branch:
+            _validate_ref(branch, "branch")
+
         args = ["push"]
 
         if force:
@@ -483,6 +618,12 @@ class GitPlugin(Plugin):
         rebase = params.get("rebase", False)
         ff_only = params.get("fast_forward", False)
 
+        # #24: Validate inputs
+        _validate_path(path, "path")
+        _validate_ref(remote, "remote")
+        if branch:
+            _validate_ref(branch, "branch")
+
         args = ["pull"]
 
         if rebase:
@@ -531,6 +672,12 @@ class GitPlugin(Plugin):
         tags = params.get("tags", False)
         prune = params.get("prune", False)
 
+        # #24: Validate inputs
+        _validate_path(path, "path")
+        _validate_ref(remote, "remote")
+        if branch:
+            _validate_ref(branch, "branch")
+
         args = ["fetch"]
 
         if tags:
@@ -577,6 +724,15 @@ class GitPlugin(Plugin):
         action = params.get("action", "list")
         start_point = params.get("start_point")
         force = params.get("force", False)
+
+        # #24: Validate inputs
+        _validate_path(path, "path")
+        if action not in _REF_ACTIONS:
+            return {"success": False, "error": f"Unknown action: {action}. Must be one of {sorted(_REF_ACTIONS)}"}
+        if name:
+            _validate_ref(name, "branch name")
+        if start_point:
+            _validate_commit_hash(start_point)
 
         if action == "list":
             args = ["branch", "-a"]  # List all branches
@@ -655,6 +811,17 @@ class GitPlugin(Plugin):
         create = params.get("create", False)
         force = params.get("force", False)
 
+        # #24: Validate inputs
+        _validate_path(path, "path")
+        if branch:
+            _validate_ref(branch, "branch")
+        if files:
+            if isinstance(files, str):
+                _validate_path(files, "file path")
+            else:
+                for f in files:
+                    _validate_path(f, "file path")
+
         args = ["checkout"]
 
         if force:
@@ -713,6 +880,10 @@ class GitPlugin(Plugin):
         if not branch:
             return {"success": False, "error": "Branch to merge required"}
 
+        # #24: Validate inputs
+        _validate_path(path, "path")
+        _validate_ref(branch, "branch")
+
         args = ["merge"]
 
         if ff_only:
@@ -763,6 +934,15 @@ class GitPlugin(Plugin):
         message = params.get("message")
         commit = params.get("commit")
         force = params.get("force", False)
+
+        # #24: Validate inputs
+        _validate_path(path, "path")
+        if action not in _REF_ACTIONS:
+            return {"success": False, "error": f"Unknown action: {action}. Must be one of {sorted(_REF_ACTIONS)}"}
+        if name:
+            _validate_ref(name, "tag name")
+        if commit:
+            _validate_commit_hash(commit)
 
         if action == "list":
             args = ["tag", "-l"]
@@ -828,6 +1008,19 @@ class GitPlugin(Plugin):
         branch = params.get("branch")
         oneline = params.get("oneline", False)
         format_str = params.get("format")
+
+        # #24: Validate inputs
+        _validate_path(path, "path")
+        try:
+            count = int(count)
+            if count < 1:
+                raise ValueError
+        except (ValueError, TypeError):
+            return {"success": False, "error": f"Invalid count: {count!r}"}
+        if branch:
+            _validate_ref(branch, "branch")
+        if format_str and not _SAFE_FORMAT_RE.match(format_str):
+            return {"success": False, "error": f"Invalid format string: {format_str!r}"}
 
         args = ["log"]
 
@@ -899,13 +1092,28 @@ class GitPlugin(Plugin):
         staged = params.get("staged", False)
         files = params.get("files")
 
+        # #24: Validate inputs
+        _validate_path(path, "path")
+        if commit1:
+            _validate_commit_hash(commit1)
+        if commit2:
+            _validate_commit_hash(commit2)
+        if files:
+            if isinstance(files, str):
+                _validate_path(files, "file path")
+            else:
+                for f in files:
+                    _validate_path(f, "file path")
+
         args = ["diff"]
 
         if staged:
             args.append("--staged")
 
         if commit1 and commit2:
-            args.append(f"{commit1}..{commit2}")
+            # #24: Use two separate args instead of ".." range syntax
+            # to avoid string interpolation injection
+            args.extend([commit1, commit2])
         elif commit1:
             args.append(commit1)
 
@@ -948,6 +1156,13 @@ class GitPlugin(Plugin):
         action = params.get("action", "list")
         name = params.get("name")
         url = params.get("url")
+
+        # #24: Validate inputs
+        _validate_path(path, "path")
+        if action not in _REMOTE_ACTIONS:
+            return {"success": False, "error": f"Unknown action: {action}. Must be one of {sorted(_REMOTE_ACTIONS)}"}
+        if name:
+            _validate_ref(name, "remote name")
 
         if action == "list":
             args = ["remote", "-v"]
@@ -1021,6 +1236,13 @@ class GitPlugin(Plugin):
         mode = params.get("mode", "mixed")
         commit = params.get("commit")
 
+        # #24: Validate inputs
+        _validate_path(path, "path")
+        if mode not in _RESET_MODES:
+            return {"success": False, "error": f"Invalid reset mode: {mode!r}. Must be one of {sorted(_RESET_MODES)}"}
+        if commit:
+            _validate_commit_hash(commit)
+
         args = ["reset"]
 
         if mode in ["soft", "mixed", "hard", "merge"]:
@@ -1058,6 +1280,15 @@ class GitPlugin(Plugin):
         action = params.get("action", "push")
         message = params.get("message")
         stash = params.get("stash", "stash@{0}")
+
+        # #24: Validate inputs
+        _validate_path(path, "path")
+        if action not in _STASH_ACTIONS:
+            return {"success": False, "error": f"Unknown action: {action}. Must be one of {sorted(_STASH_ACTIONS)}"}
+        # Validate stash reference format (e.g., stash@{0})
+        if action in ("pop", "apply", "drop"):
+            if not re.match(r'^stash@\{\d+\}$', stash):
+                return {"success": False, "error": f"Invalid stash reference: {stash!r}"}
 
         if action == "push":
             args = ["stash", "push"]
@@ -1129,6 +1360,16 @@ class GitPlugin(Plugin):
         value = params.get("value")
         global_ = params.get("global_", False)
         action = params.get("action", "get")
+
+        # #24: Validate inputs
+        _validate_path(path, "path")
+        if action not in _CONFIG_ACTIONS:
+            return {"success": False, "error": f"Unknown action: {action}. Must be one of {sorted(_CONFIG_ACTIONS)}"}
+        if key:
+            if not _CONFIG_KEY_RE.match(key):
+                return {"success": False, "error": f"Invalid config key: {key!r}"}
+        if value is not None and not _CONFIG_VALUE_RE.match(str(value)):
+            return {"success": False, "error": f"Invalid config value: {value!r}"}
 
         args = ["config"]
 

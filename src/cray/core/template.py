@@ -197,15 +197,25 @@ class TemplateEngine:
             field = parts[1] if len(parts) > 1 else None
             
             step_data = context.get('steps', {}).get(step_name, {})
-            
+
             if field:
                 # Check special fields first
                 if field in ("success", "output", "error"):
                     return step_data.get(field)
+                # Check step_data directly (for flat step context)
+                if field in step_data:
+                    return step_data[field]
+                # Try nested path within step_data (e.g., data.name)
+                nested_val = self._get_nested(step_data, field)
+                if nested_val is not None:
+                    return nested_val
                 # Otherwise look in step's output
                 output = step_data.get("output", {})
                 if isinstance(output, dict):
-                    return output.get(field)
+                    val = output.get(field)
+                    if val is not None:
+                        return val
+                    return self._get_nested(output, field)
                 return self._get_nested(output, field)
             return step_data
         
