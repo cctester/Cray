@@ -256,7 +256,16 @@ class Runner:
         context: Dict[str, Any],
         dep_graph: DependencyGraph
     ) -> TaskResult:
-        """Execute a step with retry logic."""
+        """Execute a step with retry logic.
+
+        Each retry attempt receives fresh context including:
+        - ``retry`` dict with attempt number, max retries, and last error
+        - ``steps.<step_name>`` updated with the latest failure info
+
+        This allows steps to adapt their behaviour based on what went wrong
+        in the previous attempt (e.g. reading ``{{ retry.last_error }}``
+        to decide an alternative action).
+        """
         dep_graph.mark_running(step.name)
         retry_count = step.get_retry_count()
 
@@ -268,12 +277,39 @@ class Runner:
                     f"Retrying step '{step.name}' "
                     f"({attempt + 1}/{retry_count})"
                 )
+
+                # ── Inject fresh retry context ──────────────────────
+                retry_context: Dict[str, Any] = {
+                    "attempt": attempt + 1,
+                    "max_retries": retry_count,
+                    "last_error": result.error,
+                    "last_output": result.output,
+                }
+                # Shallow-copy context so mutations don't leak across
+                # attempts, then overlay the retry metadata.
+                fresh_context = {**context, "retry": retry_context}
+                # Also update the step's own entry so templates like
+                # {{ steps.my_step.error }} reflect the latest failure.
+                fresh_context["steps"] = {
+                    **context.get("steps", {}),
+                    step.name: {
+                        "success": result.success,
+                        "output": result.output or {},
+                        "error": result.error,
+                    },
+                }
+
                 # Wait before retry
                 if step.retry_delay > 0:
                     await asyncio.sleep(step.retry_delay)
-                result = await self._execute_step(step, context)
+
+                result = await self._execute_step(step, fresh_context)
                 if result.success:
                     break
+
+        # Clean up: remove stale ``retry`` key from the *original* context
+        # so downstream steps don't see retry metadata from an unrelated step.
+        context.pop("retry", None)
 
         if result.success:
             dep_graph.mark_success(step.name, result.output)

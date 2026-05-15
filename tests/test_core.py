@@ -58,6 +58,42 @@ class TestWorkflow:
         errors = workflow.validate_steps()
         assert any("Duplicate" in e for e in errors)
 
+    def test_invalid_step_names(self):
+        """Test detection of invalid step names (#16)."""
+        # Names with spaces or special chars should be rejected
+        workflow = Workflow(
+            name="test",
+            steps=[
+                Step(name="step 1", plugin="shell", action="exec"),
+                Step(name="step@2", plugin="shell", action="exec"),
+            ]
+        )
+        errors = workflow.validate_steps()
+        assert any("invalid" in e.lower() for e in errors)
+        assert len([e for e in errors if "invalid" in e.lower()]) == 2
+
+    def test_valid_step_names(self):
+        """Test that valid step names pass validation (#16)."""
+        workflow = Workflow(
+            name="test",
+            steps=[
+                Step(name="step-1", plugin="shell", action="exec"),
+                Step(name="step_2", plugin="shell", action="exec"),
+                Step(name="step3", plugin="shell", action="exec"),
+            ]
+        )
+        errors = workflow.validate_steps()
+        assert len(errors) == 0
+
+    def test_empty_step_name(self):
+        """Test that empty step name is rejected (#16)."""
+        workflow = Workflow(
+            name="test",
+            steps=[Step(name="", plugin="shell", action="exec")]
+        )
+        errors = workflow.validate_steps()
+        assert any("empty name" in e.lower() for e in errors)
+
 
 class TestTrigger:
     """Test Trigger class."""

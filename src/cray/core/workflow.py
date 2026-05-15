@@ -3,6 +3,7 @@ Workflow definition and management.
 """
 
 from __future__ import annotations
+import re
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 from enum import Enum
@@ -10,6 +11,9 @@ from datetime import datetime
 import yaml
 from pydantic import BaseModel, Field
 from loguru import logger
+
+# Valid step name: alphanumeric, underscores, hyphens (no spaces or special chars)
+_STEP_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 
 class Step(BaseModel):
@@ -166,6 +170,16 @@ class Workflow(BaseModel):
         if not self.steps:
             errors.append("Workflow has no steps defined")
             return errors
+
+        # Validate step name format
+        for step in self.steps:
+            if not step.name:
+                errors.append(f"Step has empty name")
+            elif not _STEP_NAME_PATTERN.match(step.name):
+                errors.append(
+                    f"Step name '{step.name}' is invalid: "
+                    f"use only alphanumeric characters, underscores, and hyphens"
+                )
 
         step_names = [s.name for s in self.steps]
         duplicates = [n for n in step_names if step_names.count(n) > 1]
