@@ -10,7 +10,7 @@ from typing import Dict, Set, Any, Optional
 
 import psutil
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request, Depends
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from starlette.middleware.cors import CORSMiddleware
@@ -568,7 +568,12 @@ def create_app(workflow_dir: str = "./workflows") -> FastAPI:
 
 
 # Serve frontend
-app.mount("/assets", StaticFiles(directory="dashboard/dist/assets"), name="assets")
+assets_path = Path(__file__).resolve().parent.parent.parent.parent / "dashboard" / "dist" / "assets"
+if assets_path.exists():
+    app.mount("/assets", StaticFiles(directory=str(assets_path)), name="assets")
+    logger.info(f"Serving frontend assets from {assets_path}")
+else:
+    logger.warning(f"Frontend assets not found at {assets_path}. Run 'npm run build' in the dashboard directory.")
 
 
 # Secrets management

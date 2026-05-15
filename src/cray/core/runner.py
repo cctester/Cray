@@ -196,22 +196,22 @@ class Runner:
             }
             completed.add(step_name)
 
-                    if result.success:
-                        dep_graph.mark_success(step_name, result.output)
-                    else:
-                        dep_graph.mark_failed(step_name, result.error)
-                        failed_steps.add(step_name)
+            if result.success:
+                dep_graph.mark_success(step_name, result.output)
+            else:
+                dep_graph.mark_failed(step_name, result.error)
+                failed_steps.add(step_name)
 
-                        # Execute step-level on_error handler
-                        step = step_map[step_name]
-                        if step.on_error:
-                            await self._execute_step_error_handler(step, result, context)
+                # Execute step-level on_error handler
+                step = step_map[step_name]
+                if step.on_error:
+                    await self._execute_step_error_handler(step, result, context)
 
-                        if not step.continue_on_error:
-                            # Execute workflow-level on_error handlers
-                            await self._execute_callbacks(workflow.on_error, context)
-                            task.fail(f"Step '{step_name}' failed: {result.error}")
-                            return
+                if not step.continue_on_error:
+                    # Execute workflow-level on_error handlers
+                    await self._execute_callbacks(workflow.on_error, context)
+                    task.fail(f"Step '{step_name}' failed: {result.error}")
+                    return
 
     def _check_failed_dependencies(
         self,
