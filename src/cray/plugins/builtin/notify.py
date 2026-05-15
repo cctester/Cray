@@ -193,7 +193,7 @@ class NotifyPlugin(Plugin):
                             "success": True,
                         }
                 
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 return await loop.run_in_executor(None, sync_post)
                 
         except Exception as e:
