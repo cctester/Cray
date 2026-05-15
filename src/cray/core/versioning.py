@@ -14,10 +14,69 @@ import hashlib
 import difflib
 import threading
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Callable
 from datetime import datetime
 from dataclasses import dataclass, field, asdict
 from loguru import logger
+
+
+# Current schema version — bump when introducing breaking format changes
+SCHEMA_VERSION = 2
+
+
+@dataclass
+class Migration:
+    """A single migration step from one schema version to the next."""
+    from_version: int
+    to_version: int
+    description: str
+    migrate_version_file: Callable[[Dict[str, Any]], Dict[str, Any]]
+    migrate_index_file: Callable[[Dict[str, Any]], Dict[str, Any]]
+
+
+# ── Migration definitions ────────────────────────────────────────────
+
+def _v1_to_v2_version(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Migrate a version file from schema v1 to v2.
+
+    v1 had no schema_version field and no checksum validation.
+    v2 adds schema_version and content_checksum.
+    """
+    data["schema_version"] = 2
+    # Recompute content_checksum from content if missing
+    if "content_checksum" not in data and "content" in data:
+        data["content_checksum"] = hashlib.sha256(
+            data["content"].encode()
+        ).hexdigest()[:16]
+    return data
+
+
+def _v1_to_v2_index(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Migrate an index file from schema v1 to v2.
+
+    v2 adds schema_version to the index.
+    """
+    data["schema_version"] = 2
+    return data
+
+
+MIGRATIONS: List[Migration] = [
+    Migration(
+        from_version=1,
+        to_version=2,
+        description="Add schema_version and content_checksum fields",
+        migrate_version_file=_v1_to_v2_version,
+        migrate_index_file=_v1_to_v2_index,
+    ),
+]
+
+
+def _build_migration_chain() -> Dict[int, Migration]:
+    """Build a lookup from -> migration for quick access."""
+    return {m.from_version: m for m in MIGRATIONS}
+
+
+_MIGRATION_MAP = _build_migration_chain()
 
 
 @dataclass
@@ -32,17 +91,36 @@ class WorkflowVersion:
     message: str = ""
     tags: List[str] = field(default_factory=list)
     parent_version: Optional[str] = None
-    
+    schema_version: int = SCHEMA_VERSION
+    content_checksum: str = ""
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
-        return asdict(self)
-    
+        d = asdict(self)
+        # Ensure content_checksum is populated
+        if not d.get("content_checksum") and d.get("content"):
+            d["content_checksum"] = hashlib.sha256(
+                d["content"].encode()
+            ).hexdigest()[:16]
+        return d
+
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "WorkflowVersion":
         """Create from dictionary. Ignores unknown keys for forward compatibility."""
         known_fields = {f.name for f in cls.__dataclass_fields__.values()}
         filtered = {k: v for k, v in data.items() if k in known_fields}
         return cls(**filtered)
+
+    def verify_checksum(self) -> bool:
+        """Verify that content_checksum matches the actual content.
+
+        Returns True if checksum is valid or was not set (legacy data).
+        """
+        if not self.content_checksum:
+            # Legacy version without checksum — can't verify but not invalid
+            return True
+        actual = hashlib.sha256(self.content.encode()).hexdigest()[:16]
+        return actual == self.content_checksum
 
 
 @dataclass
@@ -82,13 +160,102 @@ class WorkflowVersionManager:
     def __init__(self, storage_path: Optional[str] = None):
         """
         Initialize version manager.
-        
+
         Args:
             storage_path: Path to store version history
         """
         self.storage_path = Path(storage_path or "~/.cray/versions")
         self.storage_path = self.storage_path.expanduser()
         self.storage_path.mkdir(parents=True, exist_ok=True)
+        self._migrate_all_workflows()
+
+    def _migrate_all_workflows(self) -> None:
+        """Run pending migrations for all stored workflows."""
+        if not self.storage_path.exists():
+            return
+
+        for wf_dir in self.storage_path.iterdir():
+            if wf_dir.is_dir():
+                try:
+                    self._migrate_workflow(wf_dir)
+                except Exception as e:
+                    logger.error(
+                        f"Migration failed for '{wf_dir.name}': {e}"
+                    )
+
+    def _migrate_workflow(self, wf_dir: Path) -> None:
+        """Migrate a single workflow's data to the current schema version.
+
+        Reads the schema_version from the index file (defaults to 1 for
+        legacy data with no schema_version field), then applies migrations
+        sequentially until the current SCHEMA_VERSION is reached.
+
+        Each migration transforms version JSON files and the index file.
+        A backup of the pre-migration state is saved as
+        .migration_backup_<to_version>.json for each step.
+        """
+        index_file = wf_dir / "index.json"
+        if not index_file.exists():
+            # No index yet — will be created on first save_version
+            return
+
+        index_data = json.loads(index_file.read_text())
+        current_sv = index_data.get("schema_version", 1)
+
+        if current_sv >= SCHEMA_VERSION:
+            return  # Already up to date
+
+        logger.info(
+            f"Migrating '{wf_dir.name}' from schema v{current_sv} "
+            f"to v{SCHEMA_VERSION}"
+        )
+
+        while current_sv < SCHEMA_VERSION:
+            migration = _MIGRATION_MAP.get(current_sv)
+            if migration is None:
+                logger.error(
+                    f"No migration path from schema v{current_sv} "
+                    f"for '{wf_dir.name}'. Stopping."
+                )
+                break
+
+            # ── Backup before migration ──
+            backup_suffix = f".migration_backup_v{migration.to_version}"
+            # Backup index
+            shutil.copy2(
+                index_file,
+                wf_dir / f"index.json{backup_suffix}",
+            )
+
+            # ── Migrate index ──
+            index_data = migration.migrate_index_file(index_data)
+            current_sv = migration.to_version
+            index_data["schema_version"] = current_sv
+            index_file.write_text(json.dumps(index_data, indent=2))
+
+            # ── Migrate each version file ──
+            for version_id in index_data.get("versions", []):
+                version_file = wf_dir / f"{version_id}.json"
+                if not version_file.exists():
+                    continue
+                # Backup version file
+                shutil.copy2(
+                    version_file,
+                    wf_dir / f"{version_id}.json{backup_suffix}",
+                )
+                vdata = json.loads(version_file.read_text())
+                vdata = migration.migrate_version_file(vdata)
+                version_file.write_text(json.dumps(vdata, indent=2))
+
+            logger.info(
+                f"  Applied migration v{migration.from_version} → "
+                f"v{migration.to_version}: {migration.description}"
+            )
+
+        logger.info(
+            f"Migration complete for '{wf_dir.name}', "
+            f"now at schema v{current_sv}"
+        )
     
     def _get_workflow_dir(self, workflow_name: str) -> Path:
         """Get the version directory for a workflow."""
@@ -164,7 +331,9 @@ class WorkflowVersionManager:
         
         # Save version file
         version_file = wf_dir / f"{version_id}.json"
-        version_file.write_text(json.dumps(version.to_dict(), indent=2))
+        version_dict = version.to_dict()
+        version_dict["schema_version"] = SCHEMA_VERSION
+        version_file.write_text(json.dumps(version_dict, indent=2))
         version_file.chmod(0o600)
         
         # Update index
@@ -177,17 +346,18 @@ class WorkflowVersionManager:
         """Update the version index for a workflow."""
         wf_dir = self._get_workflow_dir(workflow_name)
         index_file = wf_dir / "index.json"
-        
+
         if index_file.exists():
             index = json.loads(index_file.read_text())
         else:
-            index = {"versions": [], "current": None}
-        
+            index = {"versions": [], "current": None, "schema_version": SCHEMA_VERSION}
+
         # Add to front of list (newest first)
         if version.version_id not in index["versions"]:
             index["versions"].insert(0, version.version_id)
-        
+
         index["current"] = version.version_id
+        index["schema_version"] = SCHEMA_VERSION
         index_file.write_text(json.dumps(index, indent=2))
     
     def list_versions(self, workflow_name: str) -> List[WorkflowVersion]:
@@ -224,22 +394,31 @@ class WorkflowVersionManager:
     ) -> Optional[WorkflowVersion]:
         """
         Get a specific version of a workflow.
-        
+
         Args:
             workflow_name: Name of the workflow
             version_id: Version ID to get
-            
+
         Returns:
             The version or None if not found
         """
         wf_dir = self._get_workflow_dir(workflow_name)
         version_file = wf_dir / f"{version_id}.json"
-        
+
         if not version_file.exists():
             return None
-        
+
         data = json.loads(version_file.read_text())
-        return WorkflowVersion.from_dict(data)
+        version = WorkflowVersion.from_dict(data)
+
+        # Verify checksum if available
+        if not version.verify_checksum():
+            logger.warning(
+                f"Checksum mismatch for {workflow_name}/{version_id}. "
+                f"Content may have been tampered with."
+            )
+
+        return version
     
     def get_current(self, workflow_name: str) -> Optional[WorkflowVersion]:
         """Get the current (latest) version of a workflow."""
