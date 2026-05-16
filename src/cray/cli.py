@@ -14,7 +14,7 @@ from rich.panel import Panel
 from loguru import logger
 
 from cray import __version__
-from cray.core.workflow import Workflow
+from cray.core.workflow import Workflow, YAMLValidationError
 from cray.core.runner import Runner
 from cray.plugins import PluginManager
 
@@ -204,6 +204,11 @@ def validate(workflow_file: str):
         
         console.print(table)
         
+    except YAMLValidationError as e:
+        console.print("[red]YAML schema validation failed:[/red]")
+        for error in e.errors:
+            console.print(f" - {error}")
+        sys.exit(1)
     except Exception as e:
         console.print(f"[red]Error:[/red] {e}")
         sys.exit(1)
@@ -229,14 +234,15 @@ def schedule_add(workflow_file: str, cron: Optional[str], interval: Optional[int
     
     workflow_path = Path(workflow_file)
     workflow = Workflow.from_yaml(workflow_path)
-    
+
     scheduler = Scheduler()
     scheduler.start()
-    
+
     job_id = scheduler.schedule_workflow(
         workflow,
         cron=cron,
         interval_seconds=interval,
+        workflow_file=str(workflow_path.resolve()),
     )
     
     console.print(f"[green]✓[/green] Scheduled workflow '{workflow.name}'")
