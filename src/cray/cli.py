@@ -103,10 +103,21 @@ def run(workflow_file: str, input_data: Optional[str], dry_run: bool):
             sys.exit(1)
             
     except FileNotFoundError as e:
-        console.print(f"[red]Error:[/red] {e}")
+        console.print(f"[red]Error:[/red] Workflow file not found: {workflow_path}")
+        console.print(f"[dim]  {e}[/dim]")
+        sys.exit(1)
+    except json.JSONDecodeError as e:
+        console.print(f"[red]Error:[/red] Invalid JSON in --input data for workflow '{workflow_path.name}'")
+        console.print(f"[dim]  {e}[/dim]")
+        sys.exit(1)
+    except YAMLValidationError as e:
+        console.print(f"[red]Error:[/red] YAML schema validation failed for workflow '{workflow_path.name}'")
+        for error in e.errors:
+            console.print(f"  - {error}")
         sys.exit(1)
     except Exception as e:
-        console.print(f"[red]Error:[/red] {e}")
+        console.print(f"[red]Error:[/red] Failed to run workflow '{workflow_path.name}'")
+        console.print(f"[dim]  {type(e).__name__}: {e}[/dim]")
         logger.exception("Workflow execution failed")
         sys.exit(1)
 
@@ -205,12 +216,17 @@ def validate(workflow_file: str):
         console.print(table)
         
     except YAMLValidationError as e:
-        console.print("[red]YAML schema validation failed:[/red]")
+        console.print(f"[red]YAML schema validation failed for '{workflow_path.name}':[/red]")
         for error in e.errors:
             console.print(f" - {error}")
         sys.exit(1)
+    except FileNotFoundError as e:
+        console.print(f"[red]Error:[/red] Workflow file not found: {workflow_path}")
+        console.print(f"[dim]  {e}[/dim]")
+        sys.exit(1)
     except Exception as e:
-        console.print(f"[red]Error:[/red] {e}")
+        console.print(f"[red]Error:[/red] Failed to validate workflow '{workflow_path.name}'")
+        console.print(f"[dim]  {type(e).__name__}: {e}[/dim]")
         sys.exit(1)
 
 
@@ -233,25 +249,41 @@ def schedule_add(workflow_file: str, cron: Optional[str], interval: Optional[int
         sys.exit(1)
     
     workflow_path = Path(workflow_file)
-    workflow = Workflow.from_yaml(workflow_path)
 
-    scheduler = Scheduler()
-    scheduler.start()
+    try:
+        workflow = Workflow.from_yaml(workflow_path)
+    except YAMLValidationError as e:
+        console.print(f"[red]Error:[/red] YAML schema validation failed for '{workflow_path.name}'")
+        for error in e.errors:
+            console.print(f"  - {error}")
+        sys.exit(1)
+    except Exception as e:
+        console.print(f"[red]Error:[/red] Failed to load workflow '{workflow_path.name}'")
+        console.print(f"[dim]  {type(e).__name__}: {e}[/dim]")
+        sys.exit(1)
 
-    job_id = scheduler.schedule_workflow(
-        workflow,
-        cron=cron,
-        interval_seconds=interval,
-        workflow_file=str(workflow_path.resolve()),
-    )
-    
-    console.print(f"[green]✓[/green] Scheduled workflow '{workflow.name}'")
-    console.print(f"  Job ID: {job_id}")
-    
-    if cron:
-        console.print(f"  Cron: {cron}")
-    else:
-        console.print(f"  Interval: {interval}s")
+    try:
+        scheduler = Scheduler()
+        scheduler.start()
+
+        job_id = scheduler.schedule_workflow(
+            workflow,
+            cron=cron,
+            interval_seconds=interval,
+            workflow_file=str(workflow_path.resolve()),
+        )
+
+        console.print(f"[green]✓[/green] Scheduled workflow '{workflow.name}'")
+        console.print(f" Job ID: {job_id}")
+
+        if cron:
+            console.print(f" Cron: {cron}")
+        else:
+            console.print(f" Interval: {interval}s")
+    except Exception as e:
+        console.print(f"[red]Error:[/red] Failed to schedule workflow '{workflow.name}'")
+        console.print(f"[dim]  {type(e).__name__}: {e}[/dim]")
+        sys.exit(1)
 
 
 @schedule.command("list")
@@ -339,8 +371,13 @@ def plugin_search(query: str, keyword: tuple, limit: int):
     """Search for plugins in the marketplace."""
     from cray.plugins.market import PluginMarket
 
-    market = PluginMarket()
-    plugins = market.search(query, list(keyword) if keyword else None, limit)
+    try:
+        market = PluginMarket()
+        plugins = market.search(query, list(keyword) if keyword else None, limit)
+    except Exception as e:
+        console.print(f"[red]Error:[/red] Failed to search plugins")
+        console.print(f"[dim]  {type(e).__name__}: {e}[/dim]")
+        sys.exit(1)
 
     if not plugins:
         console.print("[yellow]No plugins found[/yellow]")
@@ -375,8 +412,13 @@ def plugin_info(name: str):
     """Show detailed information about a plugin."""
     from cray.plugins.market import PluginMarket
 
-    market = PluginMarket()
-    info = market.get_info(name)
+    try:
+        market = PluginMarket()
+        info = market.get_info(name)
+    except Exception as e:
+        console.print(f"[red]Error:[/red] Failed to get info for plugin '{name}'")
+        console.print(f"[dim]  {type(e).__name__}: {e}[/dim]")
+        sys.exit(1)
 
     if not info:
         console.print(f"[red]Plugin '{name}' not found[/red]")
@@ -419,14 +461,24 @@ def plugin_install(name: str, version: Optional[str], force: bool):
     """Install a plugin from the marketplace."""
     from cray.plugins.market import PluginMarket
 
-    market = PluginMarket()
+    try:
+        market = PluginMarket()
+    except Exception as e:
+        console.print(f"[red]Error:[/red] Failed to initialize marketplace")
+        console.print(f"[dim]  {type(e).__name__}: {e}[/dim]")
+        sys.exit(1)
 
     console.print(f"[cyan]Installing plugin '{name}'...[/cyan]")
 
-    if market.install(name, version, force):
-        console.print(f"[green]✓[/green] Plugin '{name}' installed successfully")
-    else:
-        console.print(f"[red]✗[/red] Failed to install plugin '{name}'")
+    try:
+        if market.install(name, version, force):
+            console.print(f"[green]✓[/green] Plugin '{name}' installed successfully")
+        else:
+            console.print(f"[red]✗[/red] Failed to install plugin '{name}'")
+            sys.exit(1)
+    except Exception as e:
+        console.print(f"[red]Error:[/red] Failed to install plugin '{name}'")
+        console.print(f"[dim]  {type(e).__name__}: {e}[/dim]")
         sys.exit(1)
 
 
@@ -436,12 +488,22 @@ def plugin_uninstall(name: str):
     """Uninstall a plugin."""
     from cray.plugins.market import PluginMarket
 
-    market = PluginMarket()
+    try:
+        market = PluginMarket()
+    except Exception as e:
+        console.print(f"[red]Error:[/red] Failed to initialize marketplace")
+        console.print(f"[dim]  {type(e).__name__}: {e}[/dim]")
+        sys.exit(1)
 
-    if market.uninstall(name):
-        console.print(f"[green]✓[/green] Plugin '{name}' uninstalled")
-    else:
-        console.print(f"[red]✗[/red] Failed to uninstall plugin '{name}'")
+    try:
+        if market.uninstall(name):
+            console.print(f"[green]✓[/green] Plugin '{name}' uninstalled")
+        else:
+            console.print(f"[red]✗[/red] Failed to uninstall plugin '{name}'")
+            sys.exit(1)
+    except Exception as e:
+        console.print(f"[red]Error:[/red] Failed to uninstall plugin '{name}'")
+        console.print(f"[dim]  {type(e).__name__}: {e}[/dim]")
         sys.exit(1)
 
 
@@ -452,7 +514,12 @@ def plugin_update(name: Optional[str], update_all: bool):
     """Update installed plugins."""
     from cray.plugins.market import PluginMarket
 
-    market = PluginMarket()
+    try:
+        market = PluginMarket()
+    except Exception as e:
+        console.print(f"[red]Error:[/red] Failed to initialize marketplace")
+        console.print(f"[dim]  {type(e).__name__}: {e}[/dim]")
+        sys.exit(1)
 
     if update_all:
         console.print("[cyan]Updating all installed plugins...[/cyan]")
@@ -479,7 +546,12 @@ def plugin_list(only_installed: bool):
     """List plugins."""
     from cray.plugins.market import PluginMarket
 
-    market = PluginMarket()
+    try:
+        market = PluginMarket()
+    except Exception as e:
+        console.print(f"[red]Error:[/red] Failed to initialize marketplace")
+        console.print(f"[dim]  {type(e).__name__}: {e}[/dim]")
+        sys.exit(1)
 
     if only_installed:
         installed = market.list_installed()
