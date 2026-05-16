@@ -4,12 +4,22 @@ export type Theme = 'light' | 'dark'
 
 export interface Settings {
   theme: Theme
+  serverUrl: string
+  autoRefresh: boolean
+  refreshInterval: number
+  showNotifications: boolean
+  logLevel: string
 }
 
 const STORAGE_KEY = 'cray-settings'
 
 const defaultSettings: Settings = {
-  theme: 'dark'
+  theme: 'dark',
+  serverUrl: 'http://localhost:8000',
+  autoRefresh: true,
+  refreshInterval: 5,
+  showNotifications: true,
+  logLevel: 'info',
 }
 
 function loadSettings(): Settings {
@@ -34,8 +44,9 @@ watch(
   () => settings.theme,
   (theme) => {
     document.documentElement.setAttribute('data-theme', theme)
-    saveSettings({ theme })
-  }
+    saveSettings({ ...settings })
+  },
+  { deep: true }
 )
 
 export function useSettings() {
@@ -47,9 +58,15 @@ export function useSettings() {
     settings.theme = settings.theme === 'dark' ? 'light' : 'dark'
   }
 
+  function updateSettings(partial: Partial<Settings>) {
+    Object.assign(settings, partial)
+    saveSettings({ ...settings })
+  }
+
   return {
     settings,
     setTheme,
-    toggleTheme
+    toggleTheme,
+    updateSettings,
   }
 }

@@ -5,14 +5,61 @@ JSON file-based storage backend with file locking and atomic writes.
 import json
 import asyncio
 import os
-import fcntl
+import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 from loguru import logger
 
 from cray.storage.base import StorageBackend
+
+
+# ── Cross-platform file locking ────────────────────────────────────
+
+if sys.platform == "win32":
+    import msvcrt
+
+    def _flock_exclusive(fd: int) -> None:
+        """Acquire exclusive lock (blocking)."""
+        while True:
+            try:
+                msvcrt.locking(fd, msvcrt.LK_LOCK, 2**31 - 1)
+                return
+            except OSError:
+                time.sleep(0.01)
+
+    def _flock_shared(fd: int) -> None:
+        """Acquire shared lock (blocking)."""
+        # LK_RLOCK is shared lock; it may not exist in older Python.
+        # When in doubt, use LK_LOCK (also exclusive on Windows fallback).
+        try:
+            msvcrt.locking(fd, msvcrt.LK_RLOCK, 2**31 - 1)
+        except AttributeError:
+            _flock_exclusive(fd)
+
+    def _funlock(fd: int) -> None:
+        """Unlock."""
+        try:
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 2**31 - 1)
+        except OSError:
+            pass
+
+else:
+    import fcntl
+
+    def _flock_exclusive(fd: int) -> None:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+
+    def _flock_shared(fd: int) -> None:
+        fcntl.flock(fd, fcntl.LOCK_SH)
+
+    def _funlock(fd: int) -> None:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        except OSError:
+            pass
 
 
 class JsonStore(StorageBackend):
@@ -47,9 +94,11 @@ class JsonStore(StorageBackend):
     def _acquire_lock(cls, lock_path: Path, exclusive: bool = True) -> None:
         """Block until a lock on lock_path is obtained."""
         lock_path.parent.mkdir(parents=True, exist_ok=True)
-        lock_fd = open(lock_path, "w")
-        mode = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
-        fcntl.flock(lock_fd, mode)
+        lock_fd = open(lock_path, "wb")
+        if exclusive:
+            _flock_exclusive(lock_fd.fileno())
+        else:
+            _flock_shared(lock_fd.fileno())
         cls._lock_registry[str(lock_path)] = lock_fd
 
     @classmethod
@@ -59,7 +108,7 @@ class JsonStore(StorageBackend):
         lock_fd = cls._lock_registry.pop(key, None)
         if lock_fd is not None:
             try:
-                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                _funlock(lock_fd.fileno())
             except OSError:
                 pass
             lock_fd.close()

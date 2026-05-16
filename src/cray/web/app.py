@@ -429,12 +429,12 @@ async def list_plugins(_auth=Depends(verify_api_key)):
     """List all available plugins."""
     result = []
     for name in ["shell", "http", "file", "json", "database", "git", "redis", "aws", "email", "notify", "math", "text"]:
-        plugin = plugin_registry.get_plugin(name)
+        plugin = plugin_manager.get_plugin(name)
         if plugin:
             result.append({
                 "name": plugin.name,
                 "description": plugin.description,
-                "actions": list(plugin.actions.keys())
+                "actions": list(plugin.actions.keys()) if hasattr(plugin, 'actions') else []
             })
     return result
 
@@ -442,7 +442,7 @@ async def list_plugins(_auth=Depends(verify_api_key)):
 @app.get("/api/plugins/{plugin_name}")
 async def get_plugin(plugin_name: str, _auth=Depends(verify_api_key)):
     """Get plugin details."""
-    plugin = plugin_registry.get_plugin(plugin_name)
+    plugin = plugin_manager.get_plugin(plugin_name)
     if not plugin:
         raise HTTPException(status_code=404, detail=f"Plugin '{plugin_name}' not found")
     return {

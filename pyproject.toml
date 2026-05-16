@@ -55,7 +55,6 @@ all = [
 
 [project.scripts]
 cray = "cray.cli:main"
-cray-server = "cray.api:run_server"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]

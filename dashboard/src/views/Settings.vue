@@ -1,32 +1,16 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref } from 'vue'
 import { useSettings } from '@/stores/settings'
 
-const { settings, setTheme } = useSettings()
-
-const settingsForm = ref({
-  serverUrl: 'http://localhost:8000',
-  theme: settings.theme,
-  autoRefresh: true,
-  refreshInterval: 5,
-  showNotifications: true,
-  logLevel: 'info',
-})
+const { settings, setTheme, updateSettings } = useSettings()
 
 const saving = ref(false)
 const saved = ref(false)
 
-onMounted(() => {
-  settingsForm.value.theme = settings.theme
-})
-
 async function saveSettings() {
   saving.value = true
   try {
-    setTheme(settingsForm.value.theme as 'light' | 'dark')
-    localStorage.setItem('cray-settings', JSON.stringify({
-      theme: settingsForm.value.theme,
-    }))
+    updateSettings({ ...settings })
     await new Promise(r => setTimeout(r, 500))
     saved.value = true
     setTimeout(() => { saved.value = false }, 2000)
@@ -36,19 +20,19 @@ async function saveSettings() {
 }
 
 function resetSettings() {
-  settingsForm.value = {
+  updateSettings({
     serverUrl: 'http://localhost:8000',
     theme: 'dark',
     autoRefresh: true,
     refreshInterval: 5,
     showNotifications: true,
     logLevel: 'info',
-  }
+  })
   setTheme('dark')
 }
 
 function onThemeChange() {
-  const theme = settingsForm.value.theme
+  const theme = settings.theme
   if (theme !== 'auto') {
     setTheme(theme as 'light' | 'dark')
   }
