@@ -9,7 +9,7 @@ from cray.web import create_app
 @pytest.fixture
 def client():
     """Create test client."""
-    app = create_app(workflow_dir="./test_workflows")
+    app = create_app()
     return TestClient(app)
 
 

@@ -26,7 +26,7 @@ class TaskResult(BaseModel):
     
     step_name: str
     success: bool
-    output: Optional[Union[Dict[str, Any], str, List[Any]]] = None
+    output: Optional[Union[Dict[str, Any], str, List[Any], Any]] = None
     error: Optional[str] = None
     duration_ms: int = 0
 
@@ -34,7 +34,7 @@ class TaskResult(BaseModel):
 class Task(BaseModel):
     """Task instance - a single execution of a workflow."""
     
-    id: str = Field(default_factory=lambda: str(uuid.uuid4())[:16])
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     workflow_name: str
     status: TaskStatus = TaskStatus.PENDING
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -69,6 +69,10 @@ class Task(BaseModel):
     def retry(self) -> None:
         """Mark task as retrying."""
         self.status = TaskStatus.RETRYING
+
+    def is_retrying(self) -> bool:
+        """Check if task is currently retrying."""
+        return self.status == TaskStatus.RETRYING
     
     @property
     def duration_seconds(self) -> Optional[float]:

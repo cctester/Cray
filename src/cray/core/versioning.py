@@ -15,7 +15,7 @@ import difflib
 import threading
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Callable
-from datetime import datetime
+from datetime import datetime, timezone
 from dataclasses import dataclass, field, asdict
 from loguru import logger
 
@@ -92,7 +92,14 @@ class WorkflowVersion:
     tags: List[str] = field(default_factory=list)
     parent_version: Optional[str] = None
     schema_version: int = SCHEMA_VERSION
-    content_checksum: str = ""
+    content_checksum: str = ""  # SHA-256 checksum for integrity verification
+
+    def __post_init__(self):
+        """Validate fields after initialization."""
+        if self.version_id and not isinstance(self.version_id, str):
+            raise ValueError(f"version_id must be a string, got {type(self.version_id).__name__}")
+        if self.version_id and not self.version_id.strip():
+            raise ValueError("version_id must not be empty or whitespace-only")
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -322,7 +329,7 @@ class WorkflowVersionManager:
             workflow_name=workflow_name,
             content=content,
             content_hash=content_hash,
-            created_at=datetime.now().isoformat(),
+            created_at=datetime.now(timezone.utc).isoformat(),
             author=author,
             message=message,
             tags=tags or [],
@@ -576,6 +583,9 @@ class WorkflowVersionManager:
         new_parent = deleted.parent_version if deleted else None
         versions = self.list_versions(workflow_name)
         for v in versions:
+            # Skip the version being deleted
+            if v.version_id == version_id:
+                continue
             if v.parent_version == version_id:
                 v.parent_version = new_parent
                 vf = wf_dir / f"{v.version_id}.json"

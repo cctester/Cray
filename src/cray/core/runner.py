@@ -182,36 +182,36 @@ class Runner:
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
             async with state_lock:
-                for item in results:
-                    if isinstance(item, Exception):
-                        logger.error(f"Step execution error: {item}")
-                        continue
+                        for item in results:
+                            if isinstance(item, Exception):
+                                logger.error(f"Step execution error: {item}")
+                                continue
 
-                        step_name, result = item
-                        task.add_result(result)
-                        context["steps"][step_name] = {
-                            "success": result.success,
-                            "output": result.output or {},
-                            "error": result.error
-                        }
-                        completed.add(step_name)
+                            step_name, result = item
+                            task.add_result(result)
+                            context["steps"][step_name] = {
+                                "success": result.success,
+                                "output": result.output or {},
+                                "error": result.error
+                            }
+                            completed.add(step_name)
 
-            if result.success:
-                dep_graph.mark_success(step_name, result.output)
-            else:
-                dep_graph.mark_failed(step_name, result.error)
-                failed_steps.add(step_name)
+                            if result.success:
+                                dep_graph.mark_success(step_name, result.output)
+                            else:
+                                dep_graph.mark_failed(step_name, result.error)
+                                failed_steps.add(step_name)
 
-            # Execute step-level on_error handler
-            step = step_map[step_name]
-            if step.on_error:
-                await self._execute_step_error_handler(step, result, context)
+                                # Execute step-level on_error handler
+                                step = step_map[step_name]
+                                if step.on_error:
+                                    await self._execute_step_error_handler(step, result, context)
 
-            if not step.continue_on_error:
-                # Execute workflow-level on_error handlers
-                await self._execute_callbacks(workflow.on_error, context)
-                task.fail(f"Step '{step_name}' failed: {result.error}")
-                return
+                                if not step.continue_on_error:
+                                    # Execute workflow-level on_error handlers
+                                    await self._execute_callbacks(workflow.on_error, context)
+                                    task.fail(f"Step '{step_name}' failed: {result.error}")
+                                    return
 
     def _check_failed_dependencies(
         self,
@@ -467,20 +467,21 @@ class Runner:
 
         logger.info(f"Executing error handler for step '{step.name}'")
 
-        for action, params in step.on_error.items():
-            try:
-                if action == "log":
-                    logger.error(f"Step error: {params.format(error=result.error, step=step.name)}")
-                elif action == "notify":
-                    logger.info(f"Error notification: {params}")
-                elif action == "retry":
-                    # Already handled by retry logic
-                    pass
-                elif action == "ignore":
-                    # Just log and continue
-                    logger.info(f"Ignoring error in step '{step.name}'")
-            except Exception as e:
-                logger.warning(f"Error handler execution failed: {e}")
+        for handler in step.on_error:
+            for action, params in handler.items():
+                try:
+                    if action == "log":
+                        logger.error(f"Step error: {params.format(error=result.error, step=step.name)}")
+                    elif action == "notify":
+                        logger.info(f"Error notification: {params}")
+                    elif action == "retry":
+                        # Already handled by retry logic
+                        pass
+                    elif action == "ignore":
+                        # Just log and continue
+                        logger.info(f"Ignoring error in step '{step.name}'")
+                except Exception as e:
+                    logger.warning(f"Error handler execution failed: {e}")
 
     def run_sync(
         self,

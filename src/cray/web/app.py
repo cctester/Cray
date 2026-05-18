@@ -4,7 +4,7 @@ import asyncio
 import json
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Set, Any, Optional
 
@@ -299,6 +299,13 @@ async def websocket_endpoint(websocket: WebSocket):
     except Exception as e:
         logger.error(f"WebSocket error: {e}")
         await manager.disconnect(websocket)
+
+
+# Root endpoint
+@app.get("/")
+async def root():
+    """Root endpoint - return service status."""
+    return {"status": "ok", "service": "Cray Workflow Engine"}
 
 
 # API Routes (with /api prefix)

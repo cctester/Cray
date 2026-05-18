@@ -71,17 +71,27 @@ class FilePlugin(Plugin):
         else:
             # No workspace root configured — still block obvious traversal
             resolved = path.resolve()
-            # Block paths that go above CWD
-            cwd = Path.cwd().resolve()
+            # Block paths that go above CWD (if CWD is accessible)
             try:
-                resolved.relative_to(cwd)
-            except ValueError:
-                # Allow if it's an absolute path the user explicitly set
+                cwd = Path.cwd().resolve()
+            except FileNotFoundError:
+                # CWD may have been deleted (e.g. temp dir in tests)
+                # Allow absolute paths, block relative traversal
                 if not path.is_absolute():
                     raise ValueError(
-                        f"Path escapes current directory: {path_str} "
-                        f"(resolved to {resolved})"
+                        f"Cannot resolve relative path — current working directory unavailable: {path_str}"
                     )
+                cwd = None
+            if cwd is not None:
+                try:
+                    resolved.relative_to(cwd)
+                except ValueError:
+                    # Allow if it's an absolute path the user explicitly set
+                    if not path.is_absolute():
+                        raise ValueError(
+                            f"Path escapes current directory: {path_str} "
+                            f"(resolved to {resolved})"
+                        )
 
         # Reject paths with suspicious components
         parts = resolved.parts

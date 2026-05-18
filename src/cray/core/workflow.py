@@ -7,9 +7,9 @@ import re
 from typing import List, Dict, Any, Optional, Set
 from pathlib import Path
 from enum import Enum
-from datetime import datetime
+from datetime import datetime, timezone
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from loguru import logger
 
 # Valid step name: alphanumeric, underscores, hyphens (no spaces or special chars)
@@ -184,6 +184,13 @@ def _validate_step(step: Any, index: int) -> List[str]:
     if "max_retries" in step and step["max_retries"] is not None and not isinstance(step["max_retries"], int):
         errors.append(f"{prefix}: 'max_retries' must be an integer, got {type(step['max_retries']).__name__}")
 
+    # Check for conflicting retry fields
+    if "retry" in step and "max_retries" in step:
+        retry_val = step.get("retry")
+        max_retries_val = step.get("max_retries")
+        if retry_val is not None and max_retries_val is not None:
+            errors.append(f"{prefix}: Both 'retry' and 'max_retries' are specified. Use only 'max_retries' for clarity.")
+
     return errors
 
 
@@ -199,12 +206,11 @@ class Step(BaseModel):
     retry: int = 0
     retry_delay: int = 1  # seconds between retries
     timeout: int = 300
-    on_error: Optional[Dict[str, Any]] = None  # error handler
+    on_error: Optional[List[Dict[str, Any]]] = None  # error handler (list of actions)
     continue_on_error: bool = False  # continue workflow if step fails
     max_retries: Optional[int] = None  # alias for retry, for clarity
 
-    class Config:
-        extra = "allow"
+    model_config = ConfigDict(extra="allow")
 
     def get_retry_count(self) -> int:
         """Get effective retry count."""
@@ -250,8 +256,7 @@ class Workflow(BaseModel):
     parallel: bool = False  # enable parallel execution for independent steps
     max_parallel: int = 10  # max concurrent steps
 
-    class Config:
-        extra = "allow"
+    model_config = ConfigDict(extra="allow")
 
     @staticmethod
     def _parse_triggers(trigger_data_list: list) -> List[Trigger]:
@@ -260,7 +265,13 @@ class Workflow(BaseModel):
         for trigger_data in trigger_data_list:
             if isinstance(trigger_data, dict):
                 if "schedule" in trigger_data:
-                    triggers.append(Trigger.schedule(trigger_data["schedule"]))
+                    cron_val = trigger_data["schedule"]
+                    # Handle nested cron config: schedule: {cron: "..."}
+                    if isinstance(cron_val, dict):
+                        cron_expr = cron_val.get("cron", "")
+                    else:
+                        cron_expr = str(cron_val)
+                    triggers.append(Trigger.schedule(cron_expr))
                 elif trigger_data.get("manual"):
                     triggers.append(Trigger.manual())
             elif isinstance(trigger_data, str):
@@ -350,7 +361,8 @@ class Workflow(BaseModel):
             errors.append("Workflow has no steps defined")
             return errors
 
-        # Validate step name format
+        # Validate step name format and check for duplicates
+        step_names = []
         for step in self.steps:
             if not step.name:
                 errors.append(f"Step has empty name")
@@ -359,11 +371,20 @@ class Workflow(BaseModel):
                     f"Step name '{step.name}' is invalid: "
                     f"use only alphanumeric characters, underscores, and hyphens"
                 )
+            else:
+                step_names.append(step.name)
 
-        step_names = [s.name for s in self.steps]
-        duplicates = [n for n in step_names if step_names.count(n) > 1]
-        if duplicates:
-            errors.append(f"Duplicate step names: {set(duplicates)}")
+        # Check for duplicate step names
+        seen_names = set()
+        duplicate_names = set()
+        for name in step_names:
+            if name in seen_names:
+                duplicate_names.add(name)
+            else:
+                seen_names.add(name)
+
+        if duplicate_names:
+            errors.append(f"Duplicate step names: {sorted(duplicate_names)}")
 
         # Validate depends_on references
         name_set = set(step_names)
@@ -457,9 +478,10 @@ class WorkflowManager:
         """
         workflow_id = workflow_data.get("id") or workflow_data.get("name")
         workflow_path = self.workflows_dir / f"{workflow_id}.yaml"
+        self.workflows_dir.mkdir(parents=True, exist_ok=True)
 
         # Check if content field is provided (YAML from editor)
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         if workflow_data.get("content"):
             # Validate YAML content before saving
             parsed = yaml.safe_load(workflow_data["content"])
